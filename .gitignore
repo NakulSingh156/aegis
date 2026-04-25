@@ -1,0 +1,30 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment — NEVER push these
+.env
+*.env
+
+# Large files — too big for GitHub
+**/*.mp4
+**/*.avi
+**/*.mov
+**/*.pt
+**/*.onnx
+**/*.jpg
+**/*.png
+
+# Node
+node_modules/
+dist/
+.next/
+
+# Mac
+.DS_Store
+**/.DS_Store
+
+# Logs
+*.log
