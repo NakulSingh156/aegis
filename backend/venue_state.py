@@ -42,18 +42,51 @@ def update_zone(zone_name, updates: dict):
         venue_state["zones"][zone_name].update(updates)
 
 def get_snapshot():
+    """Returns a deep copy of the venue state without using thread-unsafe copy.deepcopy."""
     with lock:
-        import copy
-        return copy.deepcopy(venue_state)
+        # Manual recursive construction for stability
+        snap = {k: v for k, v in venue_state.items() if not k.startswith("_")}
+        snap["zones"] = {zid: dict(z) for zid, z in venue_state["zones"].items()}
+        snap["agent_log"] = list(venue_state.get("agent_log", []))
+        snap["sms_log"] = list(venue_state.get("sms_log", []))
+        snap["emergency_dispatch_log"] = list(venue_state.get("emergency_dispatch_log", []))
+        snap["affected_zones"] = list(venue_state.get("affected_zones", []))
+        snap["safe_zones"] = list(venue_state.get("safe_zones", []))
+        snap["evacuation_routes"] = {k: list(v) for k, v in venue_state.get("evacuation_routes", {}).items()}
+        return snap
 
 def resolve_incident():
+    """Thread-safe and idempotent incident resolution."""
+    import time
     with lock:
-        import copy
-        venue_state["_last_report_snapshot"] = copy.deepcopy(venue_state)
-        venue_state["incident_active"]   = False
-        venue_state["incident_resolved"] = True
+        if venue_state.get("incident_resolved") and not venue_state.get("incident_active"):
+            return # Already resolved
+            
+        # Take forensic snapshot BEFORE clearing
+        venue_state["_last_report_snapshot"] = get_snapshot()
+        
+        # Perform system-wide reset
+        venue_state.update({
+            "aegis_started":     False,
+            "incident_active":   False,
+            "building_alert":    False,
+            "incident_resolved": True,
+            "resolution_time":   time.strftime("%H:%M:%S")
+        })
         
         for _, z in venue_state["zones"].items():
-            z["status"] = "safe"
-            z["panic"] = False
-            z["fire_detected"] = False
+            z.update({
+                "status": "safe", 
+                "fire": False, 
+                "panic": False, 
+                "audio_event": None, 
+                "person_count": 0
+            })
+        
+        # Log resolution only once
+        resolution_msg = "✅ ALL CLEAR — Incident resolved. Area secured."
+        if not venue_state["agent_log"] or venue_state["agent_log"][-1]["action"] != resolution_msg:
+            venue_state["agent_log"].append({
+                "time": time.strftime("%H:%M:%S"),
+                "action": resolution_msg
+            })

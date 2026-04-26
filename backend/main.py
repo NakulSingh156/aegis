@@ -72,24 +72,9 @@ def start_aegis():
 
 @app.post("/resolve")
 def resolve_incident():
-    # 1. Take snapshot and update state
-    with vs.lock:
-        vs.venue_state["_last_report_snapshot"] = copy.deepcopy(vs.venue_state)
-        
-        vs.venue_state.update({
-            "aegis_started":     False,
-            "incident_active":   False,
-            "building_alert":    False,
-            "incident_resolved": True,
-            "resolution_time":   time.strftime("%H:%M:%S")
-        })
-        
-        for zone in vs.venue_state["zones"]:
-            vs.venue_state["zones"][zone].update({
-                "status": "safe", "fire": False, "panic": False, 
-                "audio_event": None
-            })
-            
+    # Use centralized resolution logic
+    vs.resolve_incident()
+    
     # 2. Cleanup actions in background
     def background_cleanup():
         stop_all_cameras()
@@ -97,8 +82,6 @@ def resolve_incident():
         building_controller.activate_all_clear_lighting()
     
     threading.Thread(target=background_cleanup, daemon=True).start()
-    
-    log_action("✅ ALL CLEAR — Incident resolved. Area secured.")
     return {"status": "resolved"}
 
 @app.post("/reset-standby")
@@ -158,7 +141,7 @@ def generate_report():
             "detection": "YOLOv8n (persons) + Classical CV (fire)",
             "routing": "BFS shortest path to nearest exit",
             "sms": "Twilio API",
-            "response_time": "< 15 seconds",
+            "speed": "< 15 seconds",
         },
     }
     return JSONResponse(content=report)
