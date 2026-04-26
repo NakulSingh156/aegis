@@ -5,6 +5,7 @@ import asyncio
 import cv2
 import time
 import threading
+import copy
 
 from websocket_manager import manager
 from detection.camera_processor import (
@@ -71,15 +72,17 @@ def start_aegis():
 
 @app.post("/resolve")
 def resolve_incident():
-    # 1. Update state IMMEDIATELY and return
+    # 1. Take snapshot and update state
     with vs.lock:
-        import copy
         vs.venue_state["_last_report_snapshot"] = copy.deepcopy(vs.venue_state)
-        vs.venue_state["aegis_started"]     = False
-        vs.venue_state["incident_active"]   = False
-        vs.venue_state["building_alert"]    = False
-        vs.venue_state["incident_resolved"] = True
-        vs.venue_state["resolution_time"]   = time.strftime("%H:%M:%S")
+        
+        vs.venue_state.update({
+            "aegis_started":     False,
+            "incident_active":   False,
+            "building_alert":    False,
+            "incident_resolved": True,
+            "resolution_time":   time.strftime("%H:%M:%S")
+        })
         
         for zone in vs.venue_state["zones"]:
             vs.venue_state["zones"][zone].update({
@@ -112,11 +115,11 @@ def generate_report():
     snap = vs.get_snapshot()
     
     # Use the frozen snapshot if available, otherwise current state
-    report_data = snap.get("_last_report_snapshot", {})
+    report_data = snap.get("_last_report_snapshot") or snap
     
-    timeline = [f"[{e['time']}] {e['action']}" for e in snap.get("agent_log", [])]
+    timeline = [f"[{e['time']}] {e['action']}" for e in report_data.get("agent_log", [])]
     zone_summary = {}
-    for zid, zd in snap.get("zones", {}).items():
+    for zid, zd in report_data.get("zones", {}).items():
         zone_summary[zid] = {
             "final_status": zd.get("status", "safe"),
             "fire_detected": zd.get("fire", False),
@@ -126,24 +129,28 @@ def generate_report():
         "recipient": s["name"], "role": s["role"],
         "phone": s["phone"], "status": s["status"],
         "timestamp": s["timestamp"],
-    } for s in snap.get("sms_log", [])]
+    } for s in report_data.get("sms_log", [])]
+    
+    # Calculate total from snapshot zones (not live ones)
+    total_persons = sum(z.get("person_count", 0) for z in report_data.get("zones", {}).values())
+    
     report = {
         "report_title": "AEGIS Incident Report",
         "venue": snap.get("venue_info", {}).get("venueName", "AEGIS Protected Venue"),
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "incident": {
-            "type": report_data.get("incident_type", snap.get("incident_type", "N/A")),
-            "severity": report_data.get("severity", snap.get("severity", "N/A")),
-            "start_time": report_data.get("incident_start_time", snap.get("incident_start_time", "N/A")),
-            "resolution_time": snap.get("resolution_time", "N/A"),
-            "affected_zones": report_data.get("affected_zones", snap.get("affected_zones", [])),
-            "total_persons_tracked": sum(z.get("person_count", 0) for z in snap.get("zones", {}).values()),
+            "type": report_data.get("incident_type", "N/A"),
+            "severity": report_data.get("severity", "N/A"),
+            "start_time": report_data.get("incident_start_time", "N/A"),
+            "resolution_time": report_data.get("resolution_time", snap.get("resolution_time", "N/A")),
+            "affected_zones": report_data.get("affected_zones", []),
+            "total_persons_tracked": total_persons,
             "casualties": 0,
-            "brief": report_data.get("incident_brief", snap.get("incident_brief", "")),
+            "brief": report_data.get("incident_brief", ""),
         },
-        "danger_zones": report_data.get("affected_zones", snap.get("affected_zones", [])),
-        "safe_zones": [z for z in snap.get("zones", {}) if z not in report_data.get("affected_zones", snap.get("affected_zones", []))],
-        "evacuation_routes": report_data.get("evacuation_routes", snap.get("evacuation_routes", {})),
+        "danger_zones": report_data.get("affected_zones", []),
+        "safe_zones": [z for z in report_data.get("zones", {}) if z not in report_data.get("affected_zones", [])],
+        "evacuation_routes": report_data.get("evacuation_routes", {}),
         "zone_detail": zone_summary,
         "sms_alerts_sent": sms_summary,
         "event_timeline": timeline,

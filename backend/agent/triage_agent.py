@@ -1,5 +1,6 @@
 import time
 import threading
+import copy
 import venue_state as vs
 from agent.tools import (
     get_venue_snapshot, classify_severity,
@@ -9,6 +10,7 @@ from agent.tools import (
     activate_emergency_protocol
 )
 from integrations.smart_building import building_controller
+from notifications.sms_service import send_emergency_sms, send_emergency_services_sms
 
 def run_triage_cycle():
     """
@@ -152,13 +154,14 @@ def _start_auto_resolve():
             building_controller.activate_all_clear_lighting()
             
             with vs.lock:
-                import copy
                 vs.venue_state["_last_report_snapshot"] = copy.deepcopy(vs.venue_state)
-                vs.venue_state["aegis_started"]     = False
-                vs.venue_state["incident_active"]   = False
-                vs.venue_state["building_alert"]    = False
-                vs.venue_state["incident_resolved"] = True
-                vs.venue_state["resolution_time"]   = time.strftime("%H:%M:%S")
+                vs.venue_state.update({
+                    "aegis_started":     False,
+                    "incident_active":   False,
+                    "building_alert":    False,
+                    "incident_resolved": True,
+                    "resolution_time":   time.strftime("%H:%M:%S")
+                })
                 # Reset all zones to safe
                 for zone in vs.venue_state["zones"]:
                     vs.venue_state["zones"][zone].update({
