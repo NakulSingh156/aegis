@@ -115,27 +115,29 @@ def process_camera(zone_name: str, config: dict):
     fire_det   = FireDetector(shared_model=_SHARED_FIRE_MODEL)
     person_det = PersonDetector(shared_model=_SHARED_PERSON_MODEL)
     
-    jpeg_buffers = PRELOADED_JPEG_BUFFERS.get(zone_name, [])
-    if not jpeg_buffers: return
+    cap = cv2.VideoCapture(config["path"])
+    if not cap.isOpened():
+        return
     
-    # We still need raw frames for detection (decode once)
-    raw_frames = [cv2.imdecode(np.frombuffer(b, np.uint8), cv2.IMREAD_COLOR) for b in jpeg_buffers]
-    
-    frame_idx = 0
     frame_count = 0
     last_fire_result   = {"fire": False, "smoke": False, "confidence": 0.0}
     last_person_result = {"person_count": 0, "crowd_crush": False}
 
     while _cameras_running:
-        jpeg_bytes = jpeg_buffers[frame_idx % len(jpeg_buffers)]
-        raw_frame  = raw_frames[frame_idx % len(raw_frames)]
-        frame_idx += 1
+        ret, frame = cap.read()
+        if not ret:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            continue
+            
         frame_count += 1
+        
+        # Resize for speed
+        detect_frame = cv2.resize(frame, (854, 480))
 
         if frame_count % 3 == 0:
             with detector_lock:
-                last_fire_result   = fire_det.analyze(raw_frame)
-                last_person_result = person_det.analyze(raw_frame)
+                last_fire_result   = fire_det.analyze(detect_frame)
+                last_person_result = person_det.analyze(detect_frame)
 
         fire  = last_fire_result["fire"]
         count = last_person_result["person_count"]
@@ -162,10 +164,22 @@ def process_camera(zone_name: str, config: dict):
             "confidence": last_fire_result["confidence"] if not incident_resolved else 0.0,
         })
 
+        annotated = detect_frame.copy()
+        if fire:
+            cv2.putText(annotated, f"FIRE CONFIRMED ({last_fire_result['confidence']*100:.0f}%)", (20,40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255), 2)
+            cv2.rectangle(annotated, (0,0), (854,480), (0,0,255), 4)
+
+        if count > 0:
+            cv2.putText(annotated, f"PPL: {count}", (20,80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,0), 2)
+
+        _, jpeg = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 50])
+        
         with frames_lock:
-            latest_frames[zone_name] = jpeg_bytes
+            latest_frames[zone_name] = jpeg.tobytes()
 
         time.sleep(0.04) 
+        
+    cap.release()
 
 def start_all_cameras():
     global _cameras_running, _threads
