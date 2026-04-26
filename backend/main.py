@@ -32,7 +32,11 @@ async def startup():
 @app.get("/health")
 def health():
     snap = vs.get_snapshot()
-    return {"status": "online", "aegis_started": snap.get("aegis_started", False)}
+    return {
+        "status": "online", 
+        "system": "AEGIS",
+        "aegis_started": snap.get("aegis_started", False)
+    }
 
 @app.get("/snapshot")
 def snapshot():
@@ -62,10 +66,10 @@ def start_aegis():
     with vs.lock:
         vs.venue_state["aegis_started"] = True
     
-    log_action("⚡ AEGIS ACTIVATED — 6 cameras online, AI detection armed.")
+    log_action(f"⚡ AEGIS ACTIVATED — 6 cameras online, AI detection armed. [INCIDENT_ID: {vs.venue_state['current_incident_id']}]")
     start_all_cameras()
     start_fusion_engine()
-    return {"status": "started"}
+    return {"status": "started", "incident_id": vs.venue_state["current_incident_id"]}
 
 
 # ── RESOLVE (All Clear) ──
@@ -150,8 +154,15 @@ def generate_report():
 
 def _full_state_reset():
     """Reset all venue state to clean slate"""
+    # 1. STOP everything first
+    stop_all_cameras()
     reset_sms_flag()
+    
+    # 2. Generate new ID to kill old zombie timers
+    new_id = f"inc_{int(time.time())}"
+    
     with vs.lock:
+        vs.venue_state["current_incident_id"] = new_id
         vs.venue_state["incident_active"]     = False
         vs.venue_state["building_alert"]      = False
         vs.venue_state["severity"]            = None

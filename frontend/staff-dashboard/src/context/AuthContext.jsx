@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from "react";
-import { 
-  createUserWithEmailAndPassword, 
+import {
+  createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   onAuthStateChanged,
   signOut
@@ -11,8 +11,8 @@ import { auth, db } from "../firebase";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser]     = useState(null);
-  const [venue, setVenue]   = useState(null);
+  const [user, setUser] = useState(null);
+  const [venue, setVenue] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Sync with Firebase Auth state
@@ -45,13 +45,13 @@ export function AuthProvider({ children }) {
   const register = async (userData) => {
     const res = await createUserWithEmailAndPassword(auth, userData.email, userData.password);
     const profile = {
-      name:         userData.name,
-      email:        userData.email,
-      role:         userData.role,
+      name: userData.name,
+      email: userData.email,
+      role: userData.role,
       organization: userData.organization,
-      createdAt:    new Date().toISOString(),
+      createdAt: new Date().toISOString(),
     };
-    
+
     // Save metadata to Firestore
     await setDoc(doc(db, "users", res.user.uid), profile);
     setUser({ uid: res.user.uid, ...profile });
@@ -71,10 +71,11 @@ export function AuthProvider({ children }) {
     }
 
     // Still send to local backend for the demo logic
-    fetch("http://localhost:8000/venue/config", {
-      method:  "POST",
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    fetch(`${API_URL}/venue/config`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(venueData)
+      body: JSON.stringify(venueData)
     }).catch(console.error);
   };
 

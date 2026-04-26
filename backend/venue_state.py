@@ -34,6 +34,7 @@ venue_state = {
     "resolution_time": None,
     "venue_info": {},           # Stores hotel name, address, etc.
     "venue_coords": {"lat": 12.9716, "lng": 77.5946}, # Default for demo
+    "current_incident_id": None, # Unique ID for each simulation cycle
 }
 
 def update_zone(zone_name, updates: dict):

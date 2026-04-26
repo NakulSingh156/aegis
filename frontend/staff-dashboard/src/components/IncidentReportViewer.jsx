@@ -5,14 +5,15 @@ export default function IncidentReportViewer() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://localhost:8000/report")
-      .then(r => r.json())
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    fetch(`${API_URL}/report`)
+      .then(res => res.json())
       .then(data => {
         setReport(data);
         setLoading(false);
       })
-      .catch(e => {
-        console.error("Failed to load report", e);
+      .catch(err => {
+        console.error("Failed to load report", err);
         setLoading(false);
       });
   }, []);
@@ -169,7 +170,7 @@ export default function IncidentReportViewer() {
           {report.event_timeline.map((log, i) => {
             const timeMatch = log.match(/^\[(.*?)\] (.*)/);
             if (!timeMatch) return <p key={i} className="text-gray-400 text-xs font-mono">{log}</p>;
-            
+
             return (
               <div key={i} className="flex gap-3 text-sm">
                 <span className="text-blue-400 font-mono text-xs mt-0.5 shrink-0">{timeMatch[1]}</span>

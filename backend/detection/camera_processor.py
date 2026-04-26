@@ -60,6 +60,42 @@ CAMERA_CONFIG = {
 latest_frames = {}
 frames_lock   = threading.Lock()
 _cameras_running = False
+_threads = []
+_threads_lock = threading.Lock()
+
+# CACHE SYSTEM: Zero Latency Pre-loading
+PRELOADED_FRAMES = {}
+
+def preload_frames():
+    """Pre-load a small buffer of frames for each zone to avoid disk I/O on Cloud Run"""
+    global PRELOADED_FRAMES
+    if PRELOADED_FRAMES:
+        return
+    
+    print("[AEGIS] Pre-loading video frames for zero-latency streaming...")
+    for zone, config in CAMERA_CONFIG.items():
+        path = config["path"]
+        cap = cv2.VideoCapture(path)
+        buffer = []
+        if not cap.isOpened():
+            print(f"[AEGIS] Failed to preload {zone} (Missing: {path})")
+            # Create a few black placeholder frames
+            placeholder = np.zeros((480, 854, 3), dtype=np.uint8) + 40
+            cv2.putText(placeholder, f"{zone.upper()} (OFFLINE)", (250, 240), 1, 2, (100,100,100), 2)
+            buffer = [placeholder] * 5
+        else:
+            # Pre-load 10 frames to give some "motion"
+            for _ in range(10):
+                ret, frame = cap.read()
+                if not ret: break
+                buffer.append(cv2.resize(frame, (854, 480)))
+            cap.release()
+        
+        PRELOADED_FRAMES[zone] = buffer
+    print(f"[AEGIS] Pre-loaded {len(PRELOADED_FRAMES)} camera streams ✅")
+
+# Initial preload
+preload_frames()
 
 # PRE-LOAD MODELS GLOBALLY: Keep camera launch <3s
 detector_lock = threading.Lock()
@@ -90,7 +126,8 @@ def process_camera(zone_name: str, config: dict):
     fire_det   = FireDetector(shared_model=_SHARED_FIRE_MODEL)
     person_det = PersonDetector(shared_model=_SHARED_PERSON_MODEL)
     
-    cap         = cv2.VideoCapture(config["path"])
+    cached_frames = PRELOADED_FRAMES.get(zone_name, [])
+    frame_idx = 0
     frame_count = 0
 
     last_fire_result   = {"fire": False, "smoke": False, "confidence": 0.0}
@@ -99,12 +136,16 @@ def process_camera(zone_name: str, config: dict):
     # Camera thread started silently
 
     while _cameras_running:
-        ret, frame = cap.read()
-        if not ret:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            continue
-
-        frame = cv2.resize(frame, (854, 480))
+        if not cached_frames:
+            # Emergency fallback
+            frame = np.zeros((480, 854, 3), dtype=np.uint8) + 40
+            cv2.putText(frame,f"SOURCE: {zone_name.upper()} (ERROR)", (230, 240), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2)
+        else:
+            # Cycle through cached frames in RAM
+            frame = cached_frames[frame_idx % len(cached_frames)]
+            frame_idx += 1
+        
         frame_count += 1
 
         # Run detectors every 3rd frame (Thread-safe sequential inference)
@@ -198,8 +239,15 @@ def _draw_overlay(frame, zone_name, status, fire_result, person_count):
     return frame
 
 def start_all_cameras():
-    global _cameras_running
-    _cameras_running = True
+    global _cameras_running, _threads
+    
+    with _threads_lock:
+        if _cameras_running:
+            print("[AEGIS] Cameras already running. Skipping start.")
+            return
+        _cameras_running = True
+        _threads = []
+
     for zone, config in CAMERA_CONFIG.items():
         # CV thread
         t = threading.Thread(
@@ -208,6 +256,7 @@ def start_all_cameras():
             daemon=True
         )
         t.start()
+        _threads.append(t)
         
         # Audio thread for each camera
         audio_t = threading.Thread(
@@ -216,25 +265,42 @@ def start_all_cameras():
             daemon=True
         )
         audio_t.start()
+        _threads.append(audio_t)
         
     # Also check simulated audio events every second
     def check_simulated():
         while _cameras_running:
             event = audio_detector.get_and_clear_event()
             if event:
-                # Apply simulated events to most relevant zone (lobby)
                 target_zone = "lobby"
                 audio_callback(target_zone, event)
             time.sleep(1)
             
     sim_t = threading.Thread(target=check_simulated, daemon=True)
     sim_t.start()
+    _threads.append(sim_t)
     
-    print("\n[AEGIS] All 6 cameras + audio detection online 🎥🔊\n")
+    print(f"\n[AEGIS] All 6 cameras + audio detection online 🎥🔊 (Threads: {len(_threads)})\n")
 
 def stop_all_cameras():
-    global _cameras_running
-    _cameras_running = False
-    with frames_lock:
-        latest_frames.clear()
-    print("[AEGIS] All cameras stopped")
+    global _cameras_running, _threads
+    
+    with _threads_lock:
+        if not _cameras_running:
+            return
+        _cameras_running = False
+        
+        print("[AEGIS] Stopping cameras and joining threads...")
+        # Give threads a moment to see the flag and exit loops
+        time.sleep(0.1) 
+        
+        for t in _threads:
+            if t.is_alive():
+                # We don't join long because they are daemons and they check _cameras_running
+                # but we wait briefly to clear the CPU for the next batch
+                t.join(timeout=0.05)
+        
+        _threads = []
+        with frames_lock:
+            latest_frames.clear()
+    print("[AEGIS] All camera resources released.")

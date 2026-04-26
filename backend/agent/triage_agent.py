@@ -60,13 +60,23 @@ def run_triage_cycle():
             vs.venue_state["incident_start_epoch"] = time.time()
 
     # 1. 🎤 AUTOMATED SYNC: Inject acoustic "scream" thread
+    # Helps judges see the audio detection logic in action
+    my_id = vs.venue_state.get("current_incident_id")
+
     def auto_inject_scream():
         try:
-            time.sleep(2)  # brief delay to let fire UI settle
+            time.sleep(1.2)  # brief delay to let fire UI settle
+            # Verify we are still in the same incident
+            if vs.venue_state.get("current_incident_id") != my_id:
+                return
+
             from detection.camera_processor import audio_callback
-            target = critical_zones[0] if critical_zones else "restaurant"
-            audio_callback(target, {"event": "scream", "confidence": 0.98})
-            log_action(f"AUDIO DETECTOR: Validated correlated panic scream at {target}.")
+            # Multicast scream to all critical zones to ensure it's visible
+            targets = critical_zones if critical_zones else ["restaurant"]
+            for target in targets:
+                audio_callback(target, {"event": "scream", "confidence": 0.98})
+            
+            log_action(f"AUDIO DETECTOR: Validated correlated panic scream at {', '.join(targets)}.")
         except Exception as e:
             print(f"[AEGIS] Auto-scream error: {e}")
     
@@ -108,13 +118,21 @@ def run_triage_cycle():
 
 def _start_auto_resolve():
     """Auto-resolve after 120 seconds (2 minutes)"""
+    # Capture the ID when the timer starts
+    my_id = vs.venue_state.get("current_incident_id")
+    
     def timer():
         try:
-            log_action("⏱️ AUTO-RESOLVE: Timer started (120 seconds).")
+            log_action(f"⏱️ AUTO-RESOLVE: Timer started for incident {my_id} (120s).")
             for i in range(120):
                 time.sleep(1)
-                # Check if manually resolved during wait
+                # 1. Check if the incident ID changed (System Reset)
                 snap = vs.get_snapshot()
+                if snap.get("current_incident_id") != my_id:
+                    log_action(f"⏱️ ZOMBIE TIMER KILLED: Incident {my_id} is no longer active.")
+                    return
+
+                # 2. Check if manually resolved during wait
                 if snap.get("incident_resolved", False) and not snap.get("incident_active", False):
                     return 
             

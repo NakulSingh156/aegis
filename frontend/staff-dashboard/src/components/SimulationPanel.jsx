@@ -4,7 +4,7 @@ import IncidentReportViewer from "./IncidentReportViewer";
 // Isolated countdown component — synced with backend start epoch
 const CountdownTimer = memo(function CountdownTimer({ startEpoch }) {
   const [now, setNow] = useState(Date.now());
-  
+
   useEffect(() => {
     const iv = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(iv);
@@ -14,14 +14,14 @@ const CountdownTimer = memo(function CountdownTimer({ startEpoch }) {
   const remaining = Math.max(0, 120 - elapsed);
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
-  
+
   return (
     <div className="bg-gray-800 rounded-lg p-3 mb-3 text-center">
       <p className="text-gray-400 text-xs text-center">Auto-resolve in</p>
       <p className="text-white text-2xl font-mono font-bold text-center">{mins}:{secs.toString().padStart(2, '0')}</p>
       <div className="w-full bg-gray-700 rounded-full h-1.5 mt-2">
         <div className="bg-red-500 h-1.5 rounded-full transition-all duration-1000"
-             style={{width: `${(remaining / 120) * 100}%`}}/>
+          style={{ width: `${(remaining / 120) * 100}%` }} />
       </div>
     </div>
   );
@@ -34,12 +34,14 @@ export default function SimulationPanel({ aegisStarted, incidentActive, incident
     // Kill all audio BEFORE re-starting (stops all-clear mid-sentence etc.)
     if (onBeforeRestart) onBeforeRestart();
     setStarting(true);
-    try { await fetch("http://localhost:8000/start-aegis", { method: "POST" }); } catch(e) {}
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    try { await fetch(`${API_URL}/start-aegis`, { method: "POST" }); } catch (e) { }
     setTimeout(() => setStarting(false), 2500);
   }, [onBeforeRestart]);
 
   const handleResolve = useCallback(() => {
-    fetch("http://localhost:8000/resolve", { method: "POST" })
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    fetch(`${API_URL}/resolve`, { method: "POST" })
       .then(() => console.log("[AEGIS] Resolve OK"))
       .catch(e => console.error("[AEGIS] Resolve err:", e));
   }, []);
@@ -68,7 +70,7 @@ export default function SimulationPanel({ aegisStarted, incidentActive, incident
     return (
       <div className="bg-gray-900 rounded-2xl p-4 border border-green-600/50">
         <div className="flex items-center gap-2 mb-2">
-          <span className="w-3 h-3 rounded-full bg-green-500 animate-pulse"/>
+          <span className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
           <h3 className="text-white font-bold text-lg">System Active</h3>
         </div>
         <p className="text-green-300 text-sm mb-3">AI scanning for threats...</p>
@@ -88,7 +90,7 @@ export default function SimulationPanel({ aegisStarted, incidentActive, incident
     return (
       <div className="bg-gray-900 rounded-2xl p-4 border-2 border-red-500/70">
         <div className="flex items-center gap-2 mb-2">
-          <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse"/>
+          <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
           <h3 className="text-red-400 font-bold text-lg">Incident Active</h3>
         </div>
 

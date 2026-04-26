@@ -135,8 +135,8 @@ class AudioDetector:
             )
             
             for chunk in stream:
-                from detection.camera_processor import _cameras_running
-                if not _cameras_running: 
+                from detection import camera_processor
+                if not camera_processor._cameras_running: 
                     break
 
                 result = self.analyze_audio_chunk(chunk, sr)

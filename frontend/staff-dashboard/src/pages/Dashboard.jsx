@@ -16,7 +16,8 @@ import { announce, startEmergencyLoop, stopAnnouncements, ANNOUNCEMENTS } from "
 
 export default function Dashboard() {
   const { user, venue, logout } = useAuth();
-  const { data: state, connected } = useWebSocket("ws://localhost:8000/ws");
+  const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
+  const { data: state, connected } = useWebSocket(wsUrl);
   const [paMuted, setPaMuted] = useState(false);
   const prevIncidentRef = useRef(false);
   const prevResolvedRef = useRef(false);
@@ -213,8 +214,8 @@ export default function Dashboard() {
               if (!paMuted) stopAnnouncements();
             }}
             className={`text-white border rounded-xl px-3 py-2 text-xs font-bold transition ${paMuted
-                ? "bg-red-900/30 border-red-600 hover:bg-red-800"
-                : "bg-green-900/30 border-green-600 hover:bg-green-800"
+              ? "bg-red-900/30 border-red-600 hover:bg-red-800"
+              : "bg-green-900/30 border-green-600 hover:bg-green-800"
               }`}>
             {paMuted ? "🔇 PA Muted" : "🔊 PA Active"}
           </button>

@@ -1,0 +1,23 @@
+# Python ignore
+venv/
+__pycache__/
+*.pyc
+
+# Exclude massive local backups
+videos_backup/
+venv_backup/
+
+# Ensure we specifically INCLUDE the newly generated lightweight inference videos
+!videos/lobby_normal.mp4
+!videos/restaurant_incident.mp4
+!videos/corridor_normal.mp4
+!videos/stairwell_normal.mp4
+!videos/parking_normal.mp4
+!videos/pool_normal.mp4
+
+# Keep important models
+!yolov8n.pt
+!fire_best.pt
+
+# Ignore node
+node_modules/
