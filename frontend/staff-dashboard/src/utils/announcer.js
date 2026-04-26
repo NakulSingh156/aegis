@@ -49,7 +49,6 @@ function speakChunk(text, lang, rate, mySession) {
     };
     u.onerror = () => reject("error");
 
-    window.speechSynthesis.cancel(); // clear any prior
     window.speechSynthesis.speak(u);
   });
 }

@@ -20,7 +20,7 @@ export default function Dashboard() {
   const { data: state, connected } = useWebSocket(wsUrl);
   const [paMuted, setPaMuted] = useState(false);
   const prevIncidentRef = useRef(false);
-  const prevResolvedRef = useRef(false);
+  const prevResolvedRef = useRef(null); // use null to detect initial load
   const paTimerRef = useRef(null);
   const [showFullBrief, setShowFullBrief] = useState(false);
 
@@ -76,6 +76,13 @@ export default function Dashboard() {
 
     const isResolved = state.incident_resolved;
     const wasResolved = prevResolvedRef.current;
+
+    // If prevResolvedRef is null, it's the very first render after a page refresh.
+    // We just record the state and DO NOT trigger audio.
+    if (wasResolved === null) {
+      prevResolvedRef.current = isResolved;
+      return;
+    }
 
     if (isResolved && !wasResolved) {
       console.log("[AEGIS] Incident Resolved Detected — Immediate PA Reset");

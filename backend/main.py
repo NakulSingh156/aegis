@@ -73,6 +73,8 @@ def start_aegis():
 def resolve_incident():
     # 1. Update state IMMEDIATELY and return
     with vs.lock:
+        import copy
+        vs.venue_state["_last_report_snapshot"] = copy.deepcopy(vs.venue_state)
         vs.venue_state["aegis_started"]     = False
         vs.venue_state["incident_active"]   = False
         vs.venue_state["building_alert"]    = False
@@ -95,6 +97,15 @@ def resolve_incident():
     
     log_action("✅ ALL CLEAR — Incident resolved. Area secured.")
     return {"status": "resolved"}
+
+@app.post("/reset-standby")
+def reset_standby():
+    _full_state_reset()
+    with vs.lock:
+        vs.venue_state["aegis_started"] = False
+        vs.venue_state["incident_active"] = False
+        vs.venue_state["incident_resolved"] = False
+    return {"status": "standby"}
 
 @app.get("/report")
 def generate_report():
