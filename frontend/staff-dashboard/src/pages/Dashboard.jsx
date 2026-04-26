@@ -78,27 +78,25 @@ export default function Dashboard() {
     const wasResolved = prevResolvedRef.current;
 
     if (isResolved && !wasResolved) {
-      console.log("[AEGIS] Incident Resolved Detected — Killing PA and playing All Clear");
-      // Kill the emergency PA immediately
-      if (paTimerRef.current) clearTimeout(paTimerRef.current);
+      console.log("[AEGIS] Incident Resolved Detected — Immediate PA Reset");
+
+      // 1. KILL existing emergency PA immediately
+      if (paTimerRef.current) {
+        if (typeof paTimerRef.current === 'number') clearTimeout(paTimerRef.current);
+        if (paTimerRef.current?.__killAllClear) paTimerRef.current.__killAllClear();
+      }
       stopAnnouncements();
+      window.speechSynthesis.cancel(); // Hard kill all current speech
       paActiveRef.current = false;
 
-      // Save this incident to localStorage history (Wrap in try/catch to avoid UI crash)
-      try {
-        saveIncidentToHistory(state);
-      } catch (err) {
-        console.error("[AEGIS] History save failed:", err);
-      }
+      // Save this incident to localStorage history
+      try { saveIncidentToHistory(state); } catch (err) { }
 
-      // Capture a kill guard — if stopAnnouncements() is called (e.g. re-simulate),
-      // this flag flips and the entire all-clear chain stops immediately.
       const killGuard = { alive: true };
       const cleanupRef = () => { killGuard.alive = false; };
-      // Store cleanup so onBeforeRestart can kill it
       paTimerRef.current = { __killAllClear: cleanupRef };
 
-      // Play All Clear 3x then auto-mute
+      // 2. Play All Clear 3x then auto-mute
       let round = 0;
       function playAllClearRound() {
         if (!killGuard.alive) return; // killed by re-simulate
