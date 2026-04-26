@@ -66,7 +66,7 @@ def run_triage_cycle():
     def auto_inject_scream():
         try:
             # 1. Wait a tiny bit for the first frame to hit the dashboard
-            time.sleep(1.0) 
+            time.sleep(0.5) # Ultra-fast sync for demo accuracy
             
             # 2. Capture latest critical zones at this exact moment
             snap = vs.get_snapshot()

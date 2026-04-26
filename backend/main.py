@@ -56,9 +56,14 @@ def update_venue_config(config: dict):
 def start_aegis():
     if vs.venue_state["aegis_started"]:
         return {"status": "already_running"}
+    
+    # Full fresh reset before starting
     _full_state_reset()
+    
     with vs.lock:
         vs.venue_state["aegis_started"] = True
+        # Ensure incident_resolved is explicitly cleared
+        vs.venue_state["incident_resolved"] = False
     log_action(f"⚡ AEGIS ACTIVATED — 6 cameras online, AI detection armed. [INCIDENT_ID: {vs.venue_state['current_incident_id']}]")
     start_all_cameras()
     start_fusion_engine()
@@ -66,21 +71,29 @@ def start_aegis():
 
 @app.post("/resolve")
 def resolve_incident():
-    stop_all_cameras()
+    # 1. Update state IMMEDIATELY and return
     with vs.lock:
         vs.venue_state["aegis_started"]     = False
         vs.venue_state["incident_active"]   = False
         vs.venue_state["building_alert"]    = False
         vs.venue_state["incident_resolved"] = True
         vs.venue_state["resolution_time"]   = time.strftime("%H:%M:%S")
+        
         for zone in vs.venue_state["zones"]:
-            vs.venue_state["zones"][zone]["status"] = "safe"
-            vs.venue_state["zones"][zone]["fire"]   = False
-            vs.venue_state["zones"][zone]["smoke"]  = False
-            vs.venue_state["zones"][zone]["panic"]  = False
-    from integrations.smart_building import building_controller
-    building_controller.activate_all_clear_lighting()
-    log_action("✅ ALL CLEAR — Incident resolved. Cameras offline. Area secured.")
+            vs.venue_state["zones"][zone].update({
+                "status": "safe", "fire": False, "panic": False, 
+                "audio_event": None
+            })
+            
+    # 2. Cleanup actions in background
+    def background_cleanup():
+        stop_all_cameras()
+        from integrations.smart_building import building_controller
+        building_controller.activate_all_clear_lighting()
+    
+    threading.Thread(target=background_cleanup, daemon=True).start()
+    
+    log_action("✅ ALL CLEAR — Incident resolved. Area secured.")
     return {"status": "resolved"}
 
 @app.get("/report")
@@ -157,6 +170,7 @@ def generate_mjpeg(zone_name: str):
         # [LOW LATENCY FIX] If no live frame, serve the first pre-loaded frame immediately
         if jpeg_bytes is None:
             cache = PRELOADED_JPEG_BUFFERS.get(zone_name, [])
+            # Pre-load just 3 frames for instant-low-overhead startup
             if cache: jpeg_bytes = cache[0]
 
         if jpeg_bytes is not None:

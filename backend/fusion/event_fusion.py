@@ -5,14 +5,14 @@ from agent.triage_agent import run_triage_cycle
 
 def fusion_loop():
     """
-    Runs every 3 seconds.
+    Runs every 1 second.
     Triggers triage agent ONCE when incident detected.
     Does NOT re-trigger if already active or resolved.
     """
     print("[FUSION] Event fusion engine started")
     
     while True:
-        time.sleep(3)
+        time.sleep(1)
         
         snapshot = vs.get_snapshot()
         zones = snapshot["zones"]

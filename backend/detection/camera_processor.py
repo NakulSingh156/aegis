@@ -75,7 +75,8 @@ def preload_frames():
             _, jpeg = cv2.imencode('.jpg', placeholder, [cv2.IMWRITE_JPEG_QUALITY, 70])
             buffer = [jpeg.tobytes()] * 5
         else:
-            for _ in range(10):
+            # Pre-load just 3 frames for instant-low-overhead startup
+            for _ in range(3):
                 ret, frame = cap.read()
                 if not ret: break
                 resized = cv2.resize(frame, (854, 480))
