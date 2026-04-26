@@ -99,6 +99,10 @@ def resolve_incident():
 @app.get("/report")
 def generate_report():
     snap = vs.get_snapshot()
+    
+    # Use the frozen snapshot if available, otherwise current state
+    report_data = snap.get("_last_report_snapshot", {})
+    
     timeline = [f"[{e['time']}] {e['action']}" for e in snap.get("agent_log", [])]
     zone_summary = {}
     for zid, zd in snap.get("zones", {}).items():
@@ -117,18 +121,18 @@ def generate_report():
         "venue": snap.get("venue_info", {}).get("venueName", "AEGIS Protected Venue"),
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "incident": {
-            "type": snap.get("incident_type", "N/A"),
-            "severity": snap.get("severity", "N/A"),
-            "start_time": snap.get("incident_start_time", "N/A"),
+            "type": report_data.get("incident_type", snap.get("incident_type", "N/A")),
+            "severity": report_data.get("severity", snap.get("severity", "N/A")),
+            "start_time": report_data.get("incident_start_time", snap.get("incident_start_time", "N/A")),
             "resolution_time": snap.get("resolution_time", "N/A"),
-            "affected_zones": snap.get("affected_zones", []),
+            "affected_zones": report_data.get("affected_zones", snap.get("affected_zones", [])),
             "total_persons_tracked": sum(z.get("person_count", 0) for z in snap.get("zones", {}).values()),
             "casualties": 0,
-            "brief": snap.get("incident_brief", ""),
+            "brief": report_data.get("incident_brief", snap.get("incident_brief", "")),
         },
-        "danger_zones": snap.get("affected_zones", []),
-        "safe_zones": [z for z in snap.get("zones", {}) if z not in snap.get("affected_zones", [])],
-        "evacuation_routes": snap.get("evacuation_routes", {}),
+        "danger_zones": report_data.get("affected_zones", snap.get("affected_zones", [])),
+        "safe_zones": [z for z in snap.get("zones", {}) if z not in report_data.get("affected_zones", snap.get("affected_zones", []))],
+        "evacuation_routes": report_data.get("evacuation_routes", snap.get("evacuation_routes", {})),
         "zone_detail": zone_summary,
         "sms_alerts_sent": sms_summary,
         "event_timeline": timeline,
@@ -178,12 +182,12 @@ async def simulate_scream():
 def generate_mjpeg(zone_name: str):
     while True:
         jpeg_bytes = None
-        with frames_lock:
-            jpeg_bytes = latest_frames.get(zone_name)
+        with cp.frames_lock:
+            jpeg_bytes = cp.latest_frames.get(zone_name)
         
         # [LOW LATENCY FIX] If no live frame, serve the first pre-loaded frame immediately
         if jpeg_bytes is None:
-            cache = PRELOADED_JPEG_BUFFERS.get(zone_name, [])
+            cache = cp.PRELOADED_JPEG_BUFFERS.get(zone_name, [])
             # Pre-load just 3 frames for instant-low-overhead startup
             if cache: jpeg_bytes = cache[0]
 

@@ -45,3 +45,15 @@ def get_snapshot():
     with lock:
         import copy
         return copy.deepcopy(venue_state)
+
+def resolve_incident():
+    with lock:
+        import copy
+        venue_state["_last_report_snapshot"] = copy.deepcopy(venue_state)
+        venue_state["incident_active"]   = False
+        venue_state["incident_resolved"] = True
+        
+        for _, z in venue_state["zones"].items():
+            z["status"] = "safe"
+            z["panic"] = False
+            z["fire_detected"] = False

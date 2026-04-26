@@ -152,6 +152,8 @@ def _start_auto_resolve():
             building_controller.activate_all_clear_lighting()
             
             with vs.lock:
+                import copy
+                vs.venue_state["_last_report_snapshot"] = copy.deepcopy(vs.venue_state)
                 vs.venue_state["aegis_started"]     = False
                 vs.venue_state["incident_active"]   = False
                 vs.venue_state["building_alert"]    = False
