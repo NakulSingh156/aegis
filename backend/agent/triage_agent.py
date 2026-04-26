@@ -65,20 +65,27 @@ def run_triage_cycle():
 
     def auto_inject_scream():
         try:
-            time.sleep(1.2)  # brief delay to let fire UI settle
-            # Verify we are still in the same incident
-            if vs.venue_state.get("current_incident_id") != my_id:
+            # 1. Wait a tiny bit for the first frame to hit the dashboard
+            time.sleep(1.0) 
+            
+            # 2. Capture latest critical zones at this exact moment
+            snap = vs.get_snapshot()
+            
+            # 3. Safety: Verify we are still in the same simulation cycle
+            if snap.get("current_incident_id") != my_id:
                 return
 
             from detection.camera_processor import audio_callback
-            # Multicast scream to all critical zones to ensure it's visible
-            targets = critical_zones if critical_zones else ["restaurant"]
-            for target in targets:
-                audio_callback(target, {"event": "scream", "confidence": 0.98})
+            # Multicast to all active danger zones to ensure it's 100% visible
+            targets = snap.get("affected_zones", [])
+            if not targets: targets = ["lobby", "restaurant"]
             
-            log_action(f"AUDIO DETECTOR: Validated correlated panic scream at {', '.join(targets)}.")
+            for target in targets:
+                audio_callback(target, {"event": "scream", "confidence": 0.99})
+            
+            log_action(f"AUDIO CORE: Synchronized panic scream sequence at {', '.join(targets)}.")
         except Exception as e:
-            print(f"[AEGIS] Auto-scream error: {e}")
+            print(f"[AEGIS] Auto-scream error: {str(e)}")
     
     threading.Thread(target=auto_inject_scream, daemon=True).start()
 

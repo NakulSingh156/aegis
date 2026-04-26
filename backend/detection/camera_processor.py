@@ -63,16 +63,16 @@ _cameras_running = False
 _threads = []
 _threads_lock = threading.Lock()
 
-# CACHE SYSTEM: Zero Latency Pre-loading
-PRELOADED_FRAMES = {}
+# CACHE SYSTEM: Zero Latency Pre-loading (Store JPEG bytes directly)
+PRELOADED_JPEG_BUFFERS = {}
 
 def preload_frames():
-    """Pre-load a small buffer of frames for each zone to avoid disk I/O on Cloud Run"""
-    global PRELOADED_FRAMES
-    if PRELOADED_FRAMES:
+    """Pre-encode a small buffer of JPEG frames for each zone to avoid CPU encoding on every request"""
+    global PRELOADED_JPEG_BUFFERS
+    if PRELOADED_JPEG_BUFFERS:
         return
     
-    print("[AEGIS] Pre-loading video frames for zero-latency streaming...")
+    print("[AEGIS] Pre-encoding video frames to JPEG for ultra-fast RAM streaming...")
     for zone, config in CAMERA_CONFIG.items():
         path = config["path"]
         cap = cv2.VideoCapture(path)
@@ -82,17 +82,20 @@ def preload_frames():
             # Create a few black placeholder frames
             placeholder = np.zeros((480, 854, 3), dtype=np.uint8) + 40
             cv2.putText(placeholder, f"{zone.upper()} (OFFLINE)", (250, 240), 1, 2, (100,100,100), 2)
-            buffer = [placeholder] * 5
+            _, jpeg = cv2.imencode('.jpg', placeholder, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            buffer = [jpeg.tobytes()] * 5
         else:
             # Pre-load 10 frames to give some "motion"
             for _ in range(10):
                 ret, frame = cap.read()
                 if not ret: break
-                buffer.append(cv2.resize(frame, (854, 480)))
+                resized = cv2.resize(frame, (854, 480))
+                _, jpeg = cv2.imencode('.jpg', resized, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                buffer.append(jpeg.tobytes())
             cap.release()
         
-        PRELOADED_FRAMES[zone] = buffer
-    print(f"[AEGIS] Pre-loaded {len(PRELOADED_FRAMES)} camera streams ✅")
+        PRELOADED_JPEG_BUFFERS[zone] = buffer
+    print(f"[AEGIS] Pre-encoded {len(PRELOADED_JPEG_BUFFERS)} camera streams ✅")
 
 # Initial preload
 preload_frames()
@@ -126,33 +129,35 @@ def process_camera(zone_name: str, config: dict):
     fire_det   = FireDetector(shared_model=_SHARED_FIRE_MODEL)
     person_det = PersonDetector(shared_model=_SHARED_PERSON_MODEL)
     
-    cached_frames = PRELOADED_FRAMES.get(zone_name, [])
+    # We still need raw frames for inference, but we share them to save memory
+    # If we pre-load as JPEG, we must decode ONCE back to numpy for detection
+    jpeg_buffers = PRELOADED_JPEG_BUFFERS.get(zone_name, [])
+    if not jpeg_buffers:
+        return # Crash safety
+    
+    # Decode just the first cached frame for inference loop placeholders
+    # We use the raw frame only for detection logic
+    raw_frames = [cv2.imdecode(np.frombuffer(b, np.uint8), cv2.IMREAD_COLOR) for b in jpeg_buffers]
+    
     frame_idx = 0
     frame_count = 0
 
     last_fire_result   = {"fire": False, "smoke": False, "confidence": 0.0}
     last_person_result = {"person_count": 0, "crowd_crush": False}
 
-    # Camera thread started silently
-
     while _cameras_running:
-        if not cached_frames:
-            # Emergency fallback
-            frame = np.zeros((480, 854, 3), dtype=np.uint8) + 40
-            cv2.putText(frame,f"SOURCE: {zone_name.upper()} (ERROR)", (230, 240), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (100, 100, 100), 2)
-        else:
-            # Cycle through cached frames in RAM
-            frame = cached_frames[frame_idx % len(cached_frames)]
-            frame_idx += 1
+        # 1. Get pre-encoded JPEG from RAM (sub-millisecond)
+        jpeg_bytes = jpeg_buffers[frame_idx % len(jpeg_buffers)]
+        raw_frame  = raw_frames[frame_idx % len(raw_frames)]
+        frame_idx += 1
         
         frame_count += 1
 
         # Run detectors every 3rd frame (Thread-safe sequential inference)
         if frame_count % 3 == 0:
             with detector_lock:
-                last_fire_result   = fire_det.analyze(frame)
-                last_person_result = person_det.analyze(frame)
+                last_fire_result   = fire_det.analyze(raw_frame)
+                last_person_result = person_det.analyze(raw_frame)
 
         fire  = last_fire_result["fire"]
         count = last_person_result["person_count"]
@@ -199,16 +204,15 @@ def process_camera(zone_name: str, config: dict):
             "confidence":   last_fire_result["confidence"] if not incident_resolved else 0.0,
         })
 
-        # Draw overlay
-        annotated = _draw_overlay(frame.copy(), zone_name, status,
-                                  last_fire_result, count)
-
+        # Draw overlay logic is bypassed for max performance in demo MJPEG
+        # We use the raw_frame for detection but send pre-encoded jpeg_bytes directly
+        
         with frames_lock:
-            latest_frames[zone_name] = annotated
+            latest_frames[zone_name] = jpeg_bytes
 
-        time.sleep(0.033)  # ~30 FPS cap
+        time.sleep(0.04)  # ~25 FPS cap
 
-    cap.release()
+    # Removed cap.release() which was causing NameError crash
     # Camera thread stopped silently
 
 def _draw_overlay(frame, zone_name, status, fire_result, person_count):

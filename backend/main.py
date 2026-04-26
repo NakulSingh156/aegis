@@ -202,16 +202,17 @@ async def simulate_scream():
 def generate_mjpeg(zone_name: str):
     while True:
         with frames_lock:
-            frame = latest_frames.get(zone_name)
-        if frame is not None:
-            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            jpeg_bytes = latest_frames.get(zone_name)
+            
+        if jpeg_bytes is not None:
+            # In the new system, jpeg_bytes are ALREADY encoded in RAM
             yield (
                 b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' +
-                buffer.tobytes() +
+                jpeg_bytes +
                 b'\r\n'
             )
-        time.sleep(0.1)
+        time.sleep(0.04) # Match the 25fps cache speed
 
 @app.get("/camera/{zone_name}")
 def camera_feed(zone_name: str):
