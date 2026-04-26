@@ -226,9 +226,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Broadcast state at 2Hz for stability
+            # Atomic broadcast at 2Hz
             snap = vs.get_snapshot()
             await manager.broadcast(snap)
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"[AEGIS] WS Error: {e}")
         manager.disconnect(websocket)
