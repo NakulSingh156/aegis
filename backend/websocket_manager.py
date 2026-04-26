@@ -31,13 +31,17 @@ class WebSocketManager:
     
     async def broadcast(self, data: dict):
         message = json.dumps(data, cls=NumpyEncoder)
-        dead = []
-        for ws in self.active_connections:
-            try:
-                await ws.send_text(message)
-            except:
-                dead.append(ws)
+        if not self.active_connections:
+            return
+            
+        # Concurrent broadcasting to avoid slow-client blocking
+        tasks = [ws.send_text(message) for ws in self.active_connections]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Cleanup dead connections
+        dead = [self.active_connections[i] for i, res in enumerate(results) if isinstance(res, Exception)]
         for ws in dead:
-            self.active_connections.remove(ws)
+            if ws in self.active_connections:
+                self.active_connections.remove(ws)
 
 manager = WebSocketManager()

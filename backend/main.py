@@ -226,8 +226,9 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
+            # Broadcast state at 2Hz for stability
             snap = vs.get_snapshot()
             await manager.broadcast(snap)
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
