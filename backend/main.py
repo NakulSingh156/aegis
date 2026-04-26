@@ -157,21 +157,30 @@ def generate_report():
     return JSONResponse(content=report)
 
 def _full_state_reset():
+    """Wipes all ephemeral incident data for a completely clean system start."""
     stop_all_cameras()
     reset_sms_flag()
     new_id = f"inc_{int(time.time())}"
     with vs.lock:
-        vs.venue_state["current_incident_id"] = new_id
-        vs.venue_state["incident_active"]     = False
-        vs.venue_state["building_alert"]      = False
-        vs.venue_state["severity"]            = None
-        vs.venue_state["incident_type"]       = None
-        vs.venue_state["incident_brief"]      = ""
-        vs.venue_state["agent_log"]           = []
-        vs.venue_state["affected_zones"]      = []
-        vs.venue_state["safe_zones"]          = []
-        vs.venue_state["incident_start_time"] = None
-        vs.venue_state["incident_resolved"]   = False
+        vs.venue_state.update({
+            "current_incident_id":   new_id,
+            "incident_active":       False,
+            "building_alert":        False,
+            "severity":              None,
+            "incident_type":         None,
+            "incident_brief":        "",
+            "agent_log":             [],
+            "affected_zones":        [],
+            "safe_zones":            [],
+            "evacuation_routes":     {},
+            "sms_log":               [],
+            "emergency_dispatch_log": [],
+            "incident_start_time":   None,
+            "incident_resolved":     False,
+            "resolution_time":       None,
+            "gemini_analysis":       None,
+            "_last_report_snapshot": None
+        })
         for zone in vs.venue_state["zones"]:
             vs.venue_state["zones"][zone].update({
                 "person_count": 0, "fire": False, "panic": False, 

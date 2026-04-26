@@ -78,13 +78,14 @@ export default function Dashboard() {
     const wasResolved = prevResolvedRef.current;
 
     // If prevResolvedRef is null, it's the very first render after a page refresh.
-    // We just record the state and DO NOT trigger audio.
+    // Strict Guard: ONLY play All Clear if transitioning from Active -> Resolved.
+    // If the system was ALREADY resolved when we loaded/refreshed, stay silent.
     if (wasResolved === null) {
       prevResolvedRef.current = isResolved;
       return;
     }
 
-    if (isResolved && !wasResolved) {
+    if (isResolved && !wasResolved && prevIncidentRef.current) {
       console.log("[AEGIS] Incident Resolved Detected — Immediate PA Reset");
 
       // 1. KILL existing emergency PA immediately
@@ -404,7 +405,7 @@ export default function Dashboard() {
               setPaMuted(false); // re-enable PA for next incident
             }}
           />
-          <GeminiPanel analysis={state.gemini_analysis} />
+          {(incidentActive || incidentResolved) && <GeminiPanel analysis={state.gemini_analysis} />}
 
           {/* Real-time System Telemetry Graphing */}
           <ThreatGraph
@@ -413,7 +414,7 @@ export default function Dashboard() {
             resolved={incidentResolved}
           />
 
-          {(camerasLive || incidentResolved) && <AgentLog logs={state.agent_log} />}
+          {incidentActive && <AgentLog logs={state.agent_log} />}
         </div>
       </div>
     </div>
