@@ -13,20 +13,12 @@ import DensityHeatmap from "../components/DensityHeatmap";
 import IncidentHistory, { saveIncidentToHistory } from "../components/IncidentHistory";
 import { useAuth } from "../context/AuthContext";
 import { announce, startEmergencyLoop, stopAnnouncements, ANNOUNCEMENTS } from "../utils/announcer";
+import { WS_BASE_URL } from "../config";
 
 export default function Dashboard() {
   const { user, venue, logout } = useAuth();
 
-  // ── DYNAMIC WEBSOCKET PROTOCOL DETECTION ──
-  // If we are on HTTPS, browser FORCES WSS.
-  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-
-  // If Localhost: Force local port 8000. 
-  // If Production: Use VITE_WS_URL or the verified Cloud Run WSS URL.
-  const wsUrl = isLocal
-    ? "ws://localhost:8000/ws"
-    : (import.meta.env.VITE_WS_URL || "wss://aegis-backend-elq54assoq-el.a.run.app/ws");
+  const wsUrl = WS_BASE_URL;
 
   const { data: state, connected } = useWebSocket(wsUrl);
   const [paMuted, setPaMuted] = useState(false);
@@ -85,7 +77,7 @@ export default function Dashboard() {
         const hindiChunks = ANNOUNCEMENTS.fireHindi(zones, safeZones);
         startEmergencyLoop(englishChunks, hindiChunks);
         paActiveRef.current = true;
-      }, 17000);
+      }, 2000); // IMMEDIATE FEEDBACK: 2s delay instead of 17s
     }
 
     // 2. [TRANSITION: END] Active -> Resolved (Manual or Auto-Resolve)

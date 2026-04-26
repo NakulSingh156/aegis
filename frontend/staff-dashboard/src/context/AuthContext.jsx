@@ -7,6 +7,7 @@ import {
 } from "firebase/auth";
 import { doc, setDoc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
+import { API_BASE_URL } from "../config";
 
 const AuthContext = createContext(null);
 
@@ -71,8 +72,7 @@ export function AuthProvider({ children }) {
     }
 
     // Still send to local backend for the demo logic
-    // PRODUCTION HARD-LOCK: Verified Cloud Run URL
-    const API_URL = "https://aegis-backend-elq54assoq-el.a.run.app";
+    const API_URL = API_BASE_URL;
     fetch(`${API_URL}/venue/config`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

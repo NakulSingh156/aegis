@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, memo } from "react";
 import IncidentReportViewer from "./IncidentReportViewer";
+import { API_BASE_URL } from "../config";
 
 // Isolated countdown component — synced with backend start epoch
 const CountdownTimer = memo(function CountdownTimer({ startEpoch }) {
@@ -34,9 +35,7 @@ export default function SimulationPanel({ aegisStarted, incidentActive, incident
     if (onBeforeRestart) onBeforeRestart();
     setStarting(true);
 
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    // PRODUCTION HARD-LOCK: Verified Cloud Run URL
-    const API_URL = isLocal ? "http://localhost:8000" : (import.meta.env.VITE_API_URL || "https://aegis-backend-elq54assoq-el.a.run.app");
+    const API_URL = API_BASE_URL;
 
     console.log(`[AEGIS] Command Start -> ${API_URL}`);
     try {
@@ -49,9 +48,7 @@ export default function SimulationPanel({ aegisStarted, incidentActive, incident
   }, [onBeforeRestart]);
 
   const handleResolve = useCallback(async () => {
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    // PRODUCTION HARD-LOCK: Verified Cloud Run URL
-    const API_URL = isLocal ? "http://localhost:8000" : (import.meta.env.VITE_API_URL || "https://aegis-backend-elq54assoq-el.a.run.app");
+    const API_URL = API_BASE_URL;
 
     console.log(`[AEGIS] Command Resolve -> ${API_URL}`);
     try {

@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
+import { API_BASE_URL } from "../config";
 
 export default function IncidentReportViewer() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // PRODUCTION HARD-LOCK: Verified Cloud Run URL
-    const API_URL = "https://aegis-backend-elq54assoq-el.a.run.app";
+    const API_URL = API_BASE_URL;
     fetch(`${API_URL}/report`)
       .then(res => res.json())
       .then(data => {
