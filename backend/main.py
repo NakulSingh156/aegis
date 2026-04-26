@@ -22,6 +22,7 @@ app = FastAPI(title="AEGIS Crisis Response API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -141,7 +142,7 @@ def generate_report():
             "detection": "YOLOv8n (persons) + Classical CV (fire)",
             "routing": "BFS shortest path to nearest exit",
             "sms": "Twilio API",
-            "speed": "< 15 seconds",
+            "response_time": "< 15 seconds",
         },
     }
     return JSONResponse(content=report)
