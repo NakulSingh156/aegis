@@ -20,9 +20,9 @@ coverage.xml
 *.log
 .DS_Store
 .env
-test_fire*.jpg
+# Keep weights in deployment
+# yolov8n.pt
+# fire_best.pt
 backend/venv/
 frontend/
 models/
-yolov8n.pt
-fire_best.pt
