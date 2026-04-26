@@ -139,9 +139,8 @@ def generate_report():
         "sms_alerts_sent": sms_summary,
         "event_timeline": timeline,
         "system_info": {
-            "detection": "YOLOv8n (persons) + Classical CV (fire)",
-            "routing": "BFS shortest path to nearest exit",
-            "sms": "Twilio API",
+            "revision": "00027",
+            "status": "Absolute Final Stabilization Active",
             "response_time": "< 15 seconds",
         },
     }

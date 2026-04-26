@@ -16,47 +16,70 @@ import { announce, startEmergencyLoop, stopAnnouncements, ANNOUNCEMENTS } from "
 
 export default function Dashboard() {
   const { user, venue, logout } = useAuth();
-  const wsUrl = import.meta.env.VITE_WS_URL || "ws://localhost:8000/ws";
+
+  // ── DYNAMIC WEBSOCKET PROTOCOL DETECTION ──
+  // If we are on HTTPS, browser FORCES WSS.
+  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+
+  // If Localhost: Force local port 8000. 
+  // If Production: Use VITE_WS_URL or the verified Cloud Run WSS URL.
+  const wsUrl = isLocal
+    ? "ws://localhost:8000/ws"
+    : (import.meta.env.VITE_WS_URL || "wss://aegis-backend-elq54assoq-el.a.run.app/ws");
+
   const { data: state, connected } = useWebSocket(wsUrl);
   const [paMuted, setPaMuted] = useState(false);
   const prevIncidentRef = useRef(false);
   const prevResolvedRef = useRef(null); // use null to detect initial load
   const paTimerRef = useRef(null);
   const [showFullBrief, setShowFullBrief] = useState(false);
+  const [loadingTime, setLoadingTime] = useState(0);
 
   // Pre-load browser voices on mount
   useEffect(() => {
     window.speechSynthesis.getVoices();
+    const interval = setInterval(() => {
+      if (!state) setLoadingTime(t => t + 1);
+    }, 1000);
     return () => {
-      if (paTimerRef.current) clearTimeout(paTimerRef.current);
+      clearInterval(interval);
+      if (paTimerRef.current) {
+        if (typeof paTimerRef.current === 'number') clearTimeout(paTimerRef.current);
+      }
       stopAnnouncements();
     };
-  }, []);
+  }, [state]);
 
   const paActiveRef = useRef(false); // tracks if the emergency PA loop is currently running
 
-  // PA: START emergency loop when incident begins
+  // ── ATOMIC STATE transition OBSERVER ──
+  // Consolidates active and resolved transitions into one hook to avoid race conditions.
   useEffect(() => {
-    if (!state || paMuted || !state.incident_active) {
-      if (paTimerRef.current) clearTimeout(paTimerRef.current);
-      // HARD KILL: If we were active and now we aren't, kill the PA immediately
-      if (state && !state.incident_active && prevIncidentRef.current) {
-        console.log("[AEGIS] Incident stopped — Killing PA loop");
-        stopAnnouncements();
+    if (!state || paMuted) {
+      if (paTimerRef.current && typeof paTimerRef.current === 'number') {
+        clearTimeout(paTimerRef.current);
       }
       return;
     }
 
     const isActive = state.incident_active;
+    const isResolved = state.incident_resolved;
     const wasActive = prevIncidentRef.current;
+    const wasResolved = prevResolvedRef.current;
 
+    // 1. [TRANSITION: START] Standby -> Active
     if (isActive && !wasActive) {
+      console.log("[AEGIS] Transition: ACTIVE Detected");
       const zones = state.affected_zones || ["restaurant"];
       const safeZones = state.safe_zones || ["lobby", "parking", "pool_area"];
       const dangerZones = zones;
       const safeWindow = state.gemini_analysis?.estimated_safe_window || "less than 4 minutes";
 
-      if (paTimerRef.current) clearTimeout(paTimerRef.current);
+      if (paTimerRef.current && typeof paTimerRef.current === 'number') {
+        clearTimeout(paTimerRef.current);
+      }
+
       paTimerRef.current = setTimeout(() => {
         const englishChunks = ANNOUNCEMENTS.fireEnglish(zones, safeZones, dangerZones, safeWindow);
         const hindiChunks = ANNOUNCEMENTS.fireHindi(zones, safeZones);
@@ -65,49 +88,34 @@ export default function Dashboard() {
       }, 17000);
     }
 
-    prevIncidentRef.current = isActive;
-    return () => { if (paTimerRef.current) clearTimeout(paTimerRef.current); };
-  }, [state?.incident_active, paMuted]);
+    // 2. [TRANSITION: END] Active -> Resolved (Manual or Auto-Resolve)
+    if (isResolved && !wasResolved && (wasActive || wasResolved === null)) {
+      if (wasResolved === null) {
+        prevResolvedRef.current = isResolved;
+        prevIncidentRef.current = isActive;
+        return;
+      }
 
-  // PA: STOP emergency loop and play All Clear when incident resolves
-  // This is a SEPARATE useEffect to guarantee it fires on auto-resolve
-  useEffect(() => {
-    if (!state || paMuted) return;
+      console.log("[AEGIS] Transition: RESOLVED Detected — Triggering All Clear");
 
-    const isResolved = state.incident_resolved;
-    const wasResolved = prevResolvedRef.current;
-
-    // If prevResolvedRef is null, it's the very first render after a page refresh.
-    // Strict Guard: ONLY play All Clear if transitioning from Active -> Resolved.
-    // If the system was ALREADY resolved when we loaded/refreshed, stay silent.
-    if (wasResolved === null) {
-      prevResolvedRef.current = isResolved;
-      return;
-    }
-
-    if (isResolved && !wasResolved && prevIncidentRef.current) {
-      console.log("[AEGIS] Incident Resolved Detected — Immediate PA Reset");
-
-      // 1. KILL existing emergency PA immediately
+      // Kill emergency PA immediately
       if (paTimerRef.current) {
         if (typeof paTimerRef.current === 'number') clearTimeout(paTimerRef.current);
         if (paTimerRef.current?.__killAllClear) paTimerRef.current.__killAllClear();
       }
       stopAnnouncements();
-      window.speechSynthesis.cancel(); // Hard kill all current speech
+      window.speechSynthesis.cancel();
       paActiveRef.current = false;
 
-      // Save this incident to localStorage history
       try { saveIncidentToHistory(state); } catch (err) { }
 
       const killGuard = { alive: true };
       const cleanupRef = () => { killGuard.alive = false; };
       paTimerRef.current = { __killAllClear: cleanupRef };
 
-      // 2. Play All Clear 3x then auto-mute
       let round = 0;
       function playAllClearRound() {
-        if (!killGuard.alive) return; // killed by re-simulate
+        if (!killGuard.alive) return;
         if (round >= 3) {
           setPaMuted(true);
           stopAnnouncements();
@@ -135,27 +143,39 @@ export default function Dashboard() {
         });
       }
 
-      // Play All Clear 3x then auto-mute
-      playAllClearRound();
+      // 3. ENGINE RECOVERY DELAY: Wait 1.2s for browser to flush TTS buffer before starting All Clear
+      setTimeout(playAllClearRound, 1200);
     }
 
+    // 3. [HARD KILL] If incident stops but wasn't resolved (manual reset)
+    if (!isActive && !isResolved && wasActive) {
+      console.log("[AEGIS] Transition: CANCELLED/RESET Detected");
+      if (paTimerRef.current && typeof paTimerRef.current === 'number') {
+        clearTimeout(paTimerRef.current);
+      }
+      stopAnnouncements();
+      window.speechSynthesis.cancel();
+    }
+
+    // Update refs for next payload
+    prevIncidentRef.current = isActive;
     prevResolvedRef.current = isResolved;
-  }, [state?.incident_resolved, paMuted]);
+  }, [state?.incident_active, state?.incident_resolved, paMuted]);
 
   if (!state) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
       <style>{`@keyframes fadeIn { from { opacity:0; transform:translateX(-8px) } to { opacity:1; transform:translateX(0) } }`}</style>
-      <div className="text-center max-w-md">
+      <div className="text-center max-w-lg">
         <div className="text-6xl mb-6 animate-pulse">⚡</div>
         <h1 className="text-3xl font-black text-white mb-2">AEGIS Initializing</h1>
-        <p className="text-gray-500 text-sm mb-6">Autonomous Emergency Guardian &amp; Incident Synchronization</p>
-        <div className="flex flex-col gap-2 text-left mt-6">
+        <p className="text-gray-500 text-sm mb-6 uppercase tracking-widest">Autonomous Emergency Guardian &amp; Incident Synchronization</p>
+
+        <div className="flex flex-col gap-2 text-left mt-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
           {[
             "Starting camera processors...",
             "Loading YOLOv8 detection models...",
             "Initializing audio threat analysis...",
             "Connecting event fusion engine...",
-            "Establishing WebSocket connection...",
             "System ready.",
           ].map((msg, i) => (
             <div key={i} className="flex items-center gap-2 text-sm"
@@ -164,8 +184,34 @@ export default function Dashboard() {
               <span className="text-gray-300">{msg}</span>
             </div>
           ))}
+
+          <div className="flex items-center gap-2 text-sm mt-2 font-mono"
+            style={{ opacity: 0, animation: `fadeIn 0.3s ease 2.4s forwards` }}>
+            <span className={connected ? "text-green-400" : "text-yellow-500 animate-pulse"}>
+              {connected ? "✓" : "⚡"}
+            </span>
+            <span className={connected ? "text-gray-300" : "text-yellow-500"}>
+              {connected ? "WebSocket Connected" : "Awaiting Data Stream..."}
+            </span>
+          </div>
         </div>
-        <p className="text-gray-600 text-xs mt-8">Make sure backend is running on port 8000</p>
+
+        {loadingTime > 5 && (
+          <div className="mt-8 p-4 bg-red-900/20 border border-red-500/50 rounded-xl text-left animate-in fade-in duration-700">
+            <p className="text-red-400 font-bold text-sm flex items-center gap-2">
+              ⚠️ Connection slow or protocol blocked
+            </p>
+            <p className="text-gray-400 text-xs mt-2 leading-relaxed">
+              You are currently on <strong>{window.location.host}</strong>.<br />
+              Trying to connect to system at: <code className="bg-black/40 px-1 rounded">{wsUrl}</code>
+            </p>
+            <p className="text-gray-500 text-xs mt-3 italic">
+              {window.location.protocol === "https:" && wsUrl.startsWith("ws:")
+                ? "ERROR: Browser is blocking insecure WebSocket (WS) on an HTTPS site. Please use localhost dashboard for local testing."
+                : "TIP: Ensure the backend is running and the internet connection is stable."}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -174,7 +220,6 @@ export default function Dashboard() {
   const incidentActive = state.incident_active;
   const incidentResolved = state.incident_resolved;
   const isAlert = state.building_alert;
-  const severity = state.severity;
 
   // Are cameras actually running? (started AND not resolved)
   const camerasLive = aegisStarted && !incidentResolved;
@@ -272,7 +317,6 @@ export default function Dashboard() {
           alignItems: "flex-start",
           marginBottom: "16px"
         }}>
-          {/* Severity badge — Replaced P1 with icon */}
           <div style={{
             background: "#dc2626",
             color: "white",
@@ -286,7 +330,6 @@ export default function Dashboard() {
           </div>
 
           <div style={{ flex: 1 }}>
-            {/* Short summary — first sentence only */}
             <p style={{
               color: "#fca5a5",
               fontWeight: 700,
@@ -297,7 +340,6 @@ export default function Dashboard() {
               {state.incident_brief?.split('. ')[0]}.
             </p>
 
-            {/* Key facts in pills */}
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               {[
                 `⏱ Started: ${state.incident_start_time}`,
@@ -320,7 +362,6 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* "View Full Analysis" toggle */}
           <button
             onClick={() => setShowFullBrief(!showFullBrief)}
             style={{
@@ -369,12 +410,10 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Camera Feeds */}
       <div className="mb-4">
         <CameraGrid zones={state.zones} aegisStarted={camerasLive} />
       </div>
 
-      {/* Main content */}
       <div className="grid grid-cols-3 gap-4">
         <div className="col-span-2 flex flex-col gap-4">
           <VenueMap venueState={state} />
@@ -391,29 +430,27 @@ export default function Dashboard() {
             incidentResolved={incidentResolved}
             startEpoch={state.incident_start_epoch}
             onBeforeRestart={() => {
-              // Kill ALL audio immediately before re-starting
               console.log("[AEGIS] Re-simulate clicked — Force killing all audio");
               stopAnnouncements();
-              window.speechSynthesis.cancel(); // Deep kill
-              // Kill the all-clear chain's killGuard if it exists
+              window.speechSynthesis.cancel();
+              prevIncidentRef.current = false;
+              prevResolvedRef.current = null;
+              paActiveRef.current = false;
               if (paTimerRef.current?.__killAllClear) {
                 paTimerRef.current.__killAllClear();
               }
               if (paTimerRef.current && typeof paTimerRef.current === 'number') {
                 clearTimeout(paTimerRef.current);
               }
-              setPaMuted(false); // re-enable PA for next incident
+              setPaMuted(false);
             }}
           />
           {(incidentActive || incidentResolved) && <GeminiPanel analysis={state.gemini_analysis} />}
-
-          {/* Real-time System Telemetry Graphing */}
           <ThreatGraph
             zones={state.zones}
             active={aegisStarted}
             resolved={incidentResolved}
           />
-
           {incidentActive && <AgentLog logs={state.agent_log} />}
         </div>
       </div>

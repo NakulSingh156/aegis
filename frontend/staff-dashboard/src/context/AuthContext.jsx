@@ -71,7 +71,8 @@ export function AuthProvider({ children }) {
     }
 
     // Still send to local backend for the demo logic
-    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    // PRODUCTION HARD-LOCK: Verified Cloud Run URL
+    const API_URL = "https://aegis-backend-elq54assoq-el.a.run.app";
     fetch(`${API_URL}/venue/config`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

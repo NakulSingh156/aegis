@@ -96,7 +96,11 @@ export function announce(text, options = {}) {
     };
   }
   window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(u);
+  // Mandatory buffer: wait for browser TTS engine to flush cancellation before next speak
+  setTimeout(() => {
+    if (_sessionId !== mySession) return;
+    window.speechSynthesis.speak(u);
+  }, 250);
 }
 
 /**

@@ -31,19 +31,39 @@ export default function SimulationPanel({ aegisStarted, incidentActive, incident
   const [starting, setStarting] = useState(false);
 
   const handleStart = useCallback(async () => {
-    // Kill all audio BEFORE re-starting (stops all-clear mid-sentence etc.)
     if (onBeforeRestart) onBeforeRestart();
     setStarting(true);
-    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-    try { await fetch(`${API_URL}/start-aegis`, { method: "POST" }); } catch (e) { }
+
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    // PRODUCTION HARD-LOCK: Verified Cloud Run URL
+    const API_URL = isLocal ? "http://localhost:8000" : (import.meta.env.VITE_API_URL || "https://aegis-backend-elq54assoq-el.a.run.app");
+
+    console.log(`[AEGIS] Command Start -> ${API_URL}`);
+    try {
+      const res = await fetch(`${API_URL}/start-aegis`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      console.error("[AEGIS] Start failed. Host mismatch or backend offline?", e);
+    }
     setTimeout(() => setStarting(false), 2500);
   }, [onBeforeRestart]);
 
-  const handleResolve = useCallback(() => {
-    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-    fetch(`${API_URL}/resolve`, { method: "POST" })
-      .then(() => console.log("[AEGIS] Resolve OK"))
-      .catch(e => console.error("[AEGIS] Resolve err:", e));
+  const handleResolve = useCallback(async () => {
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    // PRODUCTION HARD-LOCK: Verified Cloud Run URL
+    const API_URL = isLocal ? "http://localhost:8000" : (import.meta.env.VITE_API_URL || "https://aegis-backend-elq54assoq-el.a.run.app");
+
+    console.log(`[AEGIS] Command Resolve -> ${API_URL}`);
+    try {
+      const res = await fetch(`${API_URL}/resolve`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      console.log("[AEGIS] Resolve OK");
+    } catch (e) {
+      console.error("[AEGIS] Resolve failed. Ensure backend is reachable.", e);
+      if (window.location.protocol === "https:" && API_URL.startsWith("http://")) {
+        console.warn("[AEGIS] Mixed Content Blocked! Use localhost dashboard for local backend.");
+      }
+    }
   }, []);
 
   // ── STANDBY ──

@@ -2,29 +2,29 @@ import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
 const VENUE_TYPES = [
-  { id: "hotel",    label: "Hotel",          emoji: "🏨" },
-  { id: "mall",     label: "Shopping Mall",  emoji: "🏬" },
-  { id: "hospital", label: "Hospital",       emoji: "🏥" },
-  { id: "stadium",  label: "Stadium/Arena",  emoji: "🏟️" },
-  { id: "office",   label: "Office Complex", emoji: "🏢" },
-  { id: "airport",  label: "Airport",        emoji: "✈️" },
+  { id: "hotel", label: "Hotel", emoji: "🏨" },
+  { id: "mall", label: "Shopping Mall", emoji: "🏬" },
+  { id: "hospital", label: "Hospital", emoji: "🏥" },
+  { id: "stadium", label: "Stadium/Arena", emoji: "🏟️" },
+  { id: "office", label: "Office Complex", emoji: "🏢" },
+  { id: "airport", label: "Airport", emoji: "✈️" },
 ];
 
 export default function VenueSetup({ onComplete }) {
-  const { user, saveVenue }     = useAuth();
-  const [step, setStep]         = useState(1);
+  const { user, saveVenue } = useAuth();
+  const [step, setStep] = useState(1);
   const [locating, setLocating] = useState(false);
-  const [form, setForm]         = useState({
-    venueName:   "",
-    venueType:   "",
-    address:     "",
-    city:        "",
-    state:       "",
-    country:     "India",
-    coords:      null,
-    floors:      "1",
-    zones:       "6",
-    staffCount:  "",
+  const [form, setForm] = useState({
+    venueName: "",
+    venueType: "",
+    address: "",
+    city: "",
+    state: "",
+    country: "India",
+    coords: null,
+    floors: "1",
+    zones: "6",
+    staffCount: "",
   });
 
   const update = (key, val) => setForm(f => ({ ...f, [key]: val }));
@@ -36,27 +36,33 @@ export default function VenueSetup({ onComplete }) {
     const fullAddress = `${form.address}, ${form.city}, ${form.state}, ${form.country}`;
 
     try {
-      // 1. Try Venue Name + City
       let query = `${form.venueName}, ${form.city}`;
       let res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`,
+        { headers: { 'Accept': 'application/json' } }
       );
+      if (!res.ok) throw new Error("Throttled");
       let data = await res.json();
-      
-      // 2. Fallback to just City if venue is too obscure
+
       if (!data || data.length === 0) {
+        query = `${form.city}, ${form.state}`;
         res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(form.city)}`
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`,
+          { headers: { 'Accept': 'application/json' } }
         );
         data = await res.json();
       }
 
       if (data && data.length > 0) {
         update("coords", { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+      } else {
+        // Absolute fallback to Bangalore central coordinates to unblock the demo
+        console.warn("[AEGIS] Map fallback to Bangalore center");
+        update("coords", { lat: 12.9716, lng: 77.5946 });
       }
     } catch (e) {
-      // Fallback — use city center coords
-      update("coords", { lat: 12.9716, lng: 77.5946 }); // Bangalore default
+      console.error("[AEGIS] Geocoding error:", e);
+      update("coords", { lat: 12.9716, lng: 77.5946 });
     }
     setLocating(false);
   };
@@ -65,7 +71,7 @@ export default function VenueSetup({ onComplete }) {
     const venueData = {
       ...form,
       managedBy: user?.name,
-      setupAt:   new Date().toISOString(),
+      setupAt: new Date().toISOString(),
     };
     await saveVenue(venueData);
     onComplete();
@@ -106,7 +112,7 @@ export default function VenueSetup({ onComplete }) {
         <div className="flex gap-2 mb-8">
           {[1, 2, 3].map(s => (
             <div key={s} className={`flex-1 h-1 rounded-full transition-all
-              ${step >= s ? "bg-red-500" : "bg-gray-700"}`}/>
+              ${step >= s ? "bg-red-500" : "bg-gray-700"}`} />
           ))}
         </div>
 
@@ -179,7 +185,7 @@ export default function VenueSetup({ onComplete }) {
                     City *
                   </label>
                   <input
-                     placeholder="Bangalore"
+                    placeholder="Bangalore"
                     value={form.city}
                     onChange={e => update("city", e.target.value)}
                     className={inputClass}
@@ -303,7 +309,7 @@ export default function VenueSetup({ onComplete }) {
               rounded-2xl p-6 mb-6">
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-4xl">
-                  {VENUE_TYPES.find(v=>v.id===form.venueType)?.emoji}
+                  {VENUE_TYPES.find(v => v.id === form.venueType)?.emoji}
                 </span>
                 <div>
                   <h3 className="text-white font-bold text-lg">
@@ -317,12 +323,12 @@ export default function VenueSetup({ onComplete }) {
 
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  { label: "Manager",  value: user?.name  },
-                  { label: "Role",     value: user?.role  },
-                  { label: "Floors",   value: form.floors },
-                  { label: "Staff",    value: form.staffCount || "—" },
-                  { label: "Cameras",  value: `${form.zones} zones`   },
-                  { label: "AI Model", value: "Gemini 2.0"},
+                  { label: "Manager", value: user?.name },
+                  { label: "Role", value: user?.role },
+                  { label: "Floors", value: form.floors },
+                  { label: "Staff", value: form.staffCount || "—" },
+                  { label: "Cameras", value: `${form.zones} zones` },
+                  { label: "AI Model", value: "Gemini 2.0" },
                 ].map((item, i) => (
                   <div key={i} className="bg-gray-800 rounded-xl p-3">
                     <p className="text-gray-400 text-xs">{item.label}</p>

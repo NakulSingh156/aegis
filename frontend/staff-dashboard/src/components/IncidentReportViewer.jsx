@@ -5,7 +5,8 @@ export default function IncidentReportViewer() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    // PRODUCTION HARD-LOCK: Verified Cloud Run URL
+    const API_URL = "https://aegis-backend-elq54assoq-el.a.run.app";
     fetch(`${API_URL}/report`)
       .then(res => res.json())
       .then(data => {
