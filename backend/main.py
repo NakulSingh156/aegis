@@ -7,7 +7,10 @@ import time
 import threading
 
 from websocket_manager import manager
-from detection.camera_processor import start_all_cameras, stop_all_cameras, latest_frames, frames_lock
+from detection.camera_processor import (
+    start_all_cameras, stop_all_cameras, 
+    latest_frames, frames_lock, PRELOADED_JPEG_BUFFERS
+)
 from fusion.event_fusion import start_fusion_engine
 from agent.tools import log_action, get_venue_snapshot
 from notifications.sms_service import reset_sms_flag
@@ -21,9 +24,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# System lifecycle state
-# aegis_started moved to venue_state
 
 @app.on_event("startup")
 async def startup():
@@ -47,67 +47,46 @@ def snapshot():
 def update_venue_config(config: dict):
     with vs.lock:
         vs.venue_state["venue_info"] = config
-        #Specifically extract coords for mapping logic
         if config.get("coords"):
             vs.venue_state["venue_coords"] = config["coords"]
     print(f"[AEGIS] Venue configuration received: {config.get('venueName')}")
     return {"status": "success", "message": "Venue configuration updated"}
 
-
-# ── START ──
 @app.post("/start-aegis")
 def start_aegis():
     if vs.venue_state["aegis_started"]:
         return {"status": "already_running"}
-    
-    # Full fresh reset before starting
     _full_state_reset()
-    
     with vs.lock:
         vs.venue_state["aegis_started"] = True
-    
     log_action(f"⚡ AEGIS ACTIVATED — 6 cameras online, AI detection armed. [INCIDENT_ID: {vs.venue_state['current_incident_id']}]")
     start_all_cameras()
     start_fusion_engine()
     return {"status": "started", "incident_id": vs.venue_state["current_incident_id"]}
 
-
-# ── RESOLVE (All Clear) ──
 @app.post("/resolve")
 def resolve_incident():
-    # 1. Stop cameras FIRST so they can't overwrite state
     stop_all_cameras()
-    
-    # 2. Now safely update state
     with vs.lock:
         vs.venue_state["aegis_started"]     = False
         vs.venue_state["incident_active"]   = False
         vs.venue_state["building_alert"]    = False
         vs.venue_state["incident_resolved"] = True
         vs.venue_state["resolution_time"]   = time.strftime("%H:%M:%S")
-        
-        # Force all zones safe
         for zone in vs.venue_state["zones"]:
             vs.venue_state["zones"][zone]["status"] = "safe"
             vs.venue_state["zones"][zone]["fire"]   = False
             vs.venue_state["zones"][zone]["smoke"]  = False
             vs.venue_state["zones"][zone]["panic"]  = False
-            
-    # SMART BUILDING: Restore normal lighting
     from integrations.smart_building import building_controller
     building_controller.activate_all_clear_lighting()
-    
     log_action("✅ ALL CLEAR — Incident resolved. Cameras offline. Area secured.")
     return {"status": "resolved"}
 
-
-# ── REPORT ──
 @app.get("/report")
 def generate_report():
     snap = vs.get_snapshot()
-    
     timeline = [f"[{e['time']}] {e['action']}" for e in snap.get("agent_log", [])]
-    
     zone_summary = {}
     for zid, zd in snap.get("zones", {}).items():
         zone_summary[zid] = {
@@ -115,52 +94,30 @@ def generate_report():
             "fire_detected": zd.get("fire", False),
             "persons_last_seen": zd.get("person_count", 0),
         }
-    
     sms_summary = [{
         "recipient": s["name"], "role": s["role"],
         "phone": s["phone"], "status": s["status"],
         "timestamp": s["timestamp"],
     } for s in snap.get("sms_log", [])]
-    
     report = {
         "report_title": "AEGIS Incident Report",
         "venue": snap.get("venue_info", {}).get("venueName", "AEGIS Protected Venue"),
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "incident": {
             "type": snap.get("incident_type", "N/A"),
             "severity": snap.get("severity", "N/A"),
-            "start_time": snap.get("incident_start_time", "N/A"),
-            "resolution_time": snap.get("resolution_time", "N/A"),
-            "affected_zones": snap.get("affected_zones", []),
             "total_persons_tracked": sum(z.get("person_count", 0) for z in snap.get("zones", {}).values()),
-            "casualties": 0,
             "brief": snap.get("incident_brief", ""),
         },
-        "danger_zones": snap.get("affected_zones", []),
-        "safe_zones": [z for z in snap.get("zones", {}) if z not in snap.get("affected_zones", [])],
-        "evacuation_routes": snap.get("evacuation_routes", {}),
+        "event_timeline": timeline,
         "zone_detail": zone_summary,
         "sms_alerts_sent": sms_summary,
-        "event_timeline": timeline,
-        "system_info": {
-            "detection": "YOLOv8n (persons) + Classical CV (fire)",
-            "routing": "BFS shortest path to nearest exit",
-            "sms": "Twilio API",
-            "response_time": "< 15 seconds",
-        },
     }
     return JSONResponse(content=report)
 
-
 def _full_state_reset():
-    """Reset all venue state to clean slate"""
-    # 1. STOP everything first
     stop_all_cameras()
     reset_sms_flag()
-    
-    # 2. Generate new ID to kill old zombie timers
     new_id = f"inc_{int(time.time())}"
-    
     with vs.lock:
         vs.venue_state["current_incident_id"] = new_id
         vs.venue_state["incident_active"]     = False
@@ -171,20 +128,13 @@ def _full_state_reset():
         vs.venue_state["agent_log"]           = []
         vs.venue_state["affected_zones"]      = []
         vs.venue_state["safe_zones"]          = []
-        vs.venue_state["evacuation_routes"]   = {}
         vs.venue_state["incident_start_time"] = None
         vs.venue_state["incident_resolved"]   = False
-        vs.venue_state["resolution_time"]     = None
-        vs.venue_state["sms_log"]             = []
-        vs.venue_state["emergency_dispatch_log"] = []
-        vs.venue_state["gemini_analysis"]     = None
         for zone in vs.venue_state["zones"]:
-            vs.venue_state["zones"][zone] = {
-                "person_count": 0, "fire": False, "smoke": False,
-                "panic": False, "fall": False, "status": "safe",
-                "audio_event": None, "audio_confidence": 0.0
-            }
-
+            vs.venue_state["zones"][zone].update({
+                "person_count": 0, "fire": False, "panic": False, 
+                "status": "safe", "audio_event": None
+            })
 
 @app.post("/simulate/gunshot")
 async def simulate_gunshot():
@@ -198,21 +148,28 @@ async def simulate_scream():
     audio_detector.trigger_simulated_event("scream")
     return {"status": "scream simulated"}
 
-# ── Camera streaming ──
 def generate_mjpeg(zone_name: str):
     while True:
+        jpeg_bytes = None
         with frames_lock:
             jpeg_bytes = latest_frames.get(zone_name)
-            
+        
+        # [LOW LATENCY FIX] If no live frame, serve the first pre-loaded frame immediately
+        if jpeg_bytes is None:
+            cache = PRELOADED_JPEG_BUFFERS.get(zone_name, [])
+            if cache: jpeg_bytes = cache[0]
+
         if jpeg_bytes is not None:
-            # In the new system, jpeg_bytes are ALREADY encoded in RAM
             yield (
                 b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' +
                 jpeg_bytes +
                 b'\r\n'
             )
-        time.sleep(0.04) # Match the 25fps cache speed
+            # Sleep slightly longer on idle to save bandwidth, faster on live
+            time.sleep(0.04 if latest_frames.get(zone_name) else 0.5)
+        else:
+            time.sleep(0.5)
 
 @app.get("/camera/{zone_name}")
 def camera_feed(zone_name: str):
@@ -221,8 +178,6 @@ def camera_feed(zone_name: str):
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
-
-# ── WebSocket ──
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
