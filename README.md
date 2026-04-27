@@ -527,7 +527,7 @@ Built for **Google HacktoSolve (H2S) 2026** — Problem Statement: *Rapid Crisis
 
 ---
 
-## 🏆 Google Technologies Used
+##  Google Technologies Used
 
 | Technology | Usage |
 |-----------|-------|
