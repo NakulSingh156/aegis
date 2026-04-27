@@ -35,6 +35,12 @@ export default function SimulationPanel({ aegisStarted, incidentActive, incident
     if (onBeforeRestart) onBeforeRestart();
     setStarting(true);
 
+    // [TTS UNLOCKER] Browsers block delayed speech synthesis if not initiated during a user gesture.
+    // This silent utterance unlocks the speech engine for the 6-second delayed PA loop in EmergencyManager.
+    const unlockMsg = new SpeechSynthesisUtterance('');
+    unlockMsg.volume = 0;
+    window.speechSynthesis.speak(unlockMsg);
+
     const API_URL = API_BASE_URL;
 
     console.log(`[AEGIS] Command Start -> ${API_URL}`);
