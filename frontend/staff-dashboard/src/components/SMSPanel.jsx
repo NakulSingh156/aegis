@@ -8,7 +8,7 @@ export default function SMSPanel({ smsLog = [] }) {
   return (
     <div className="bg-gray-900 rounded-2xl p-4 border border-gray-700">
       <h3 className="text-white font-bold mb-3 text-lg">📱 SMS Alert Log</h3>
-      
+
       <div className="flex flex-col gap-2">
         {smsLog.map((sms, i) => (
           <div key={i} className="bg-gray-800 rounded-xl p-3 border border-gray-600">
@@ -20,16 +20,16 @@ export default function SMSPanel({ smsLog = [] }) {
               <div className="flex items-center gap-2">
                 <span className="text-gray-500 text-xs">{sms.timestamp}</span>
                 <span className={`text-xs font-bold px-2 py-0.5 rounded-full
-                  ${sms.status === "DELIVERED" ? "bg-green-700 text-green-200" :
-                    sms.status === "SIMULATED" ? "bg-blue-900/40 text-blue-400 border border-blue-500/30" :
-                    "bg-red-700 text-red-200"}`}>
-                  {sms.status === "DELIVERED" ? "✅ DELIVERED" :
-                   sms.status === "SIMULATED" ? "📋 LOGGED" :
-                   "❌ FAILED"}
+                  ${sms.status?.toUpperCase() === "DELIVERED" ? "bg-green-700 text-green-200" :
+                    sms.status?.toUpperCase() === "SIMULATED" ? "bg-blue-900/40 text-blue-400 border border-blue-500/30" :
+                      "bg-red-700 text-red-200"}`}>
+                  {sms.status?.toUpperCase() === "DELIVERED" ? "✅ DELIVERED" :
+                    sms.status?.toUpperCase() === "SIMULATED" ? "📋 LOGGED" :
+                      "❌ FAILED"}
                 </span>
               </div>
             </div>
-            
+
             <div className="text-gray-400 text-xs mt-1">
               📞 {sms.phone}
             </div>

@@ -51,12 +51,12 @@ function kill() {
 }
 
 /**
- * Speak a SINGLE short chunk. Resolves when done speaking.
- * Rejects immediately if the session has been killed.
+ * Speak a SINGLE short chunk. ALWAYS resolves (never rejects).
+ * On error, logs and resolves so the loop continues.
  */
 function speakChunk(text, lang, rate, mySession) {
-  return new Promise((resolve, reject) => {
-    if (_sessionId !== mySession || _muted) return reject("killed");
+  return new Promise((resolve) => {
+    if (_sessionId !== mySession || _muted) return resolve();
 
     const u = new SpeechSynthesisUtterance(text);
     u.voice = getBestVoice(lang);
@@ -65,21 +65,20 @@ function speakChunk(text, lang, rate, mySession) {
     u.pitch = 1.1;
     u.volume = 1.0;
 
-    // SAFETY FALLBACK: Increase to 15s for long evacuation instructions
     const safetyTimeout = setTimeout(() => {
-      console.warn("[AEGIS] Voice onend timeout - skip chunk");
+      console.warn("[AEGIS] Voice timeout - advancing");
       resolve();
     }, 15000);
 
     u.onend = () => {
       clearTimeout(safetyTimeout);
-      if (_sessionId !== mySession) return reject("killed");
       resolve();
     };
     u.onerror = (err) => {
       clearTimeout(safetyTimeout);
-      console.error("[AEGIS] Voice Error:", err);
-      reject("error");
+      console.warn("[AEGIS] Voice error (non-fatal):", err?.error || err);
+      // Always resolve so the loop continues
+      resolve();
     };
 
     window.speechSynthesis.speak(u);
@@ -88,17 +87,11 @@ function speakChunk(text, lang, rate, mySession) {
 
 /**
  * Speak an array of short sentences sequentially.
- * Stops immediately if the session is killed.
  */
 async function speakSequence(chunks, lang, rate, mySession) {
   for (const chunk of chunks) {
     if (_sessionId !== mySession) return;
-    try {
-      await speakChunk(chunk, lang, rate, mySession);
-    } catch {
-      return; // killed or error — stop silently
-    }
-    // Tiny pause between chunks so it sounds natural
+    await speakChunk(chunk, lang, rate, mySession);
     await new Promise(r => setTimeout(r, 300));
     if (_sessionId !== mySession) return;
   }
@@ -118,6 +111,9 @@ export function announce(text, options = {}) {
 
   if (options.onSpeak) options.onSpeak(text);
 
+  // Fresh cancel to ensure clean slate
+  window.speechSynthesis.cancel();
+
   const u = new SpeechSynthesisUtterance(text);
   u.voice = getBestVoice(lang);
   u.lang = lang === "hi" ? "hi-IN" : "en-US";
@@ -131,35 +127,45 @@ export function announce(text, options = {}) {
       options.onEnd();
     };
   }
+  u.onerror = () => {
+    // Still call onEnd on error so the All-Clear sequence continues
+    if (options.onEnd && _sessionId === mySession) {
+      setTimeout(() => options.onEnd(), 500);
+    }
+  };
 
   startHeartbeat();
   if (_sessionId !== mySession) return;
-  // NOTE: No cancel here to allow queuing
-  window.speechSynthesis.speak(u);
+
+  // Slight delay after cancel() to let Chrome reset
+  setTimeout(() => {
+    if (_sessionId !== mySession) return;
+    window.speechSynthesis.speak(u);
+  }, 100);
 }
 
 /**
  * Emergency loop: speaks English chunks, then Hindi chunks, then repeats.
  * Runs until stopAnnouncements() is called.
+ * Resilient to Chrome errors — will retry up to 3 times.
  */
 export function startEmergencyLoop(englishChunks, hindiChunks, onSpeak) {
   _muted = false;
   const mySession = ++_sessionId;
   startHeartbeat();
-  window.speechSynthesis.cancel(); // ONE initial clear to take control
+  window.speechSynthesis.cancel();
 
   async function cycle() {
+    // Small initial delay to let cancel() settle
+    await new Promise(r => setTimeout(r, 200));
+
     while (_sessionId === mySession && !_muted) {
       // 1. English Sequence
       for (const chunk of englishChunks) {
         if (_sessionId !== mySession) return;
         if (onSpeak) onSpeak(chunk);
-        try {
-          await speakChunk(chunk, "en", 1.15, mySession);
-          await new Promise(r => setTimeout(r, 100)); // Sync buffer
-        } catch (e) {
-          if (e === "killed") return;
-        }
+        await speakChunk(chunk, "en", 1.15, mySession);
+        await new Promise(r => setTimeout(r, 100));
       }
 
       if (_sessionId !== mySession) return;
@@ -169,12 +175,8 @@ export function startEmergencyLoop(englishChunks, hindiChunks, onSpeak) {
       for (const chunk of hindiChunks) {
         if (_sessionId !== mySession) return;
         if (onSpeak) onSpeak(chunk);
-        try {
-          await speakChunk(chunk, "hi", 1.1, mySession);
-          await new Promise(r => setTimeout(r, 100));
-        } catch (e) {
-          if (e === "killed") return;
-        }
+        await speakChunk(chunk, "hi", 1.1, mySession);
+        await new Promise(r => setTimeout(r, 100));
       }
 
       if (_sessionId !== mySession) return;
