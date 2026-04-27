@@ -523,7 +523,7 @@ Built for **Google HacktoSolve (H2S) 2026** — Problem Statement: *Rapid Crisis
 | Ayesha Maniyar | Frontend — Dashboard, PWA, Full Stack Development |
 | Gouri Banapurmath | Cloud and Firebase Deployment |
 
-*3rd Year B.Tech Computer Science (AI) — 2026*
+*3rd Year B.Tech Computer Science (AI) — 2027*
 
 ---
 
