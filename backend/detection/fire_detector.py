@@ -15,17 +15,34 @@ class FireDetector:
             self.use_yolo = True
             return
 
-        # Try YOLO only if file exists AND is real (>1MB)
-        model_path = "models/fire_best.pt"
-        if os.path.exists(model_path):
-            size_mb = os.path.getsize(model_path) / (1024 * 1024)
+        # Lazy loading to avoid startup timeout
+        self.model_path = "models/fire_best.pt"
+        self.model_loaded = False if not self.model else True
+
+    def _ensure_model(self):
+        # Hot-swap check: If a global model has been loaded elsewhere (by camera_processor), grab it.
+        if not self.model:
+           from detection.camera_processor import _SHARED_FIRE_MODEL
+           if _SHARED_FIRE_MODEL:
+               print("[AEGIS] Upgrading FireDetector to AI-Mode!")
+               self.model = _SHARED_FIRE_MODEL
+               self.use_yolo = True
+               self.model_loaded = True
+               return
+
+        if self.model_loaded: return
+        
+        if os.path.exists(self.model_path):
+            size_mb = os.path.getsize(self.model_path) / (1024 * 1024)
             if size_mb > 1.0:
                 try:
+                    print(f"[AEGIS] Lazy-loading Fire YOLO...")
                     from ultralytics import YOLO
-                    self.model = YOLO(model_path)
+                    self.model = YOLO(self.model_path)
                     self.use_yolo = True
                 except Exception as e:
                     print(f"[FireDetector] YOLO failed: {e}")
+        self.model_loaded = True
 
     def reset(self):
         """Called on system reset to clear sticky fire state"""
@@ -34,6 +51,7 @@ class FireDetector:
         self.prev_mask = None
 
     def analyze(self, frame):
+        self._ensure_model()
         if self.use_yolo:
             return self._yolo_detection(frame)
         return self._color_based_detection(frame)
@@ -64,30 +82,30 @@ class FireDetector:
         total      = frame.shape[0] * frame.shape[1]
         fire_ratio = np.sum(fire_mask > 0) / total
 
-        # Flicker: fire pixels change significantly frame-to-frame
+        # Flicker: fire pixels change frame-to-frame (Loosened for demo)
         flicker = False
         if self.prev_mask is not None:
             diff = cv2.absdiff(fire_mask, self.prev_mask)
-            flicker = (np.sum(diff > 0) / total) > 0.015
+            flicker = (np.sum(diff > 0) / total) > 0.005 # from 0.015
         self.prev_mask = fire_mask.copy()
 
-        # Concentrated fire: need at least one big contour (not diffuse warm lighting)
+        # Concentrated fire: big contour (Loosened for demo)
         concentrated = False
         contours, _ = cv2.findContours(fire_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        big_contours = [c for c in contours if cv2.contourArea(c) > 1000]
+        big_contours = [c for c in contours if cv2.contourArea(c) > 500] # from 1000
         if len(big_contours) > 0:
             concentrated = True
 
         # ALL THREE required: enough fire pixels + flickering + concentrated
-        raw_fire = (fire_ratio > 0.05) and flicker and concentrated
+        raw_fire = (fire_ratio > 0.01) and (flicker or concentrated) # Loosened requirements
 
         if raw_fire:
             self.fire_streak += 1
         else:
             self.fire_streak = 0
 
-        # Need 8 consecutive fire frames to confirm — then STICKY
-        if self.fire_streak >= 8:
+        # Need 5 consecutive fire frames to confirm (down from 8)
+        if self.fire_streak >= 5:
             self.confirmed_fire = True
 
         fire_detected = self.confirmed_fire

@@ -1,14 +1,24 @@
-from ultralytics import YOLO
 import numpy as np
 
 class PersonDetector:
     def __init__(self, shared_model=None):
-        if shared_model:
-            self.model = shared_model
-        else:
-            self.model = YOLO("yolov8n.pt")  # auto downloads on first run
-    
+        self.model = shared_model
+        self.model_loaded = True if shared_model else False
+
+    def _ensure_model(self):
+        if self.model_loaded: return
+        try:
+            print(f"[AEGIS] Lazy-loading Person YOLO...")
+            from ultralytics import YOLO
+            self.model = YOLO("yolov8n.pt") 
+        except Exception as e:
+            print(f"[PersonDetector] YOLO failed: {e}")
+        self.model_loaded = True
+
     def analyze(self, frame):
+        self._ensure_model()
+        if not self.model:
+             return {"person_count": 0, "crowd_crush": False, "annotated_frame": frame.copy()}
         # Lower confidence threshold to detect partially visible people (pool, far away)
         results = self.model(frame, verbose=False, conf=0.10)[0]
         

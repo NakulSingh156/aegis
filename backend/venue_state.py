@@ -90,3 +90,15 @@ def resolve_incident():
                 "time": time.strftime("%H:%M:%S"),
                 "action": resolution_msg
             })
+_incident_serial = 1000
+
+def start_incident():
+    """Generates a new incident ID and marks active."""
+    global _incident_serial
+    with lock:
+        _incident_serial += 1
+        venue_state["current_incident_id"] = str(_incident_serial)
+        venue_state["aegis_started"] = True
+        venue_state["incident_active"] = False # Wait for detection
+        venue_state["incident_resolved"] = False
+        print(f"[AEGIS] New Simulation Cycle: {_incident_serial}")

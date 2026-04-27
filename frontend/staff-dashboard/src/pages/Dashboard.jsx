@@ -10,9 +10,10 @@ import SimulationPanel from "../components/SimulationPanel";
 import GeminiPanel from "../components/GeminiPanel";
 import ThreatGraph from "../components/ThreatGraph";
 import DensityHeatmap from "../components/DensityHeatmap";
-import IncidentHistory, { saveIncidentToHistory } from "../components/IncidentHistory";
 import { useAuth } from "../context/AuthContext";
-import { announce, startEmergencyLoop, stopAnnouncements, ANNOUNCEMENTS } from "../utils/announcer";
+import IncidentHistory, { saveIncidentToHistory } from "../components/IncidentHistory";
+import EmergencyManager from "../components/EmergencyManager";
+import { stopAnnouncements } from "../utils/announcer";
 import { WS_BASE_URL } from "../config";
 
 export default function Dashboard() {
@@ -22,6 +23,8 @@ export default function Dashboard() {
 
   const { data: state, connected } = useWebSocket(wsUrl);
   const [paMuted, setPaMuted] = useState(false);
+  const [paText, setPaText] = useState("");
+  const [paActive, setPaActive] = useState(false); // UI state
   const prevIncidentRef = useRef(false);
   const prevResolvedRef = useRef(null); // use null to detect initial load
   const paTimerRef = useRef(null);
@@ -45,114 +48,21 @@ export default function Dashboard() {
 
   const paActiveRef = useRef(false); // tracks if the emergency PA loop is currently running
 
-  // ── ATOMIC STATE transition OBSERVER ──
-  // Consolidates active and resolved transitions into one hook to avoid race conditions.
+  // RESOLUTION HANDLER: Only for history logging and state cleanup.
   useEffect(() => {
-    if (!state || paMuted) {
-      if (paTimerRef.current && typeof paTimerRef.current === 'number') {
-        clearTimeout(paTimerRef.current);
-      }
-      return;
-    }
-
+    if (!state) return;
     const isActive = state.incident_active;
     const isResolved = state.incident_resolved;
     const wasActive = prevIncidentRef.current;
-    const wasResolved = prevResolvedRef.current;
 
-    // 1. [TRANSITION: START] Standby -> Active
-    if (isActive && !wasActive) {
-      console.log("[AEGIS] Transition: ACTIVE Detected");
-      const zones = state.affected_zones || ["restaurant"];
-      const safeZones = state.safe_zones || ["lobby", "parking", "pool_area"];
-      const dangerZones = zones;
-      const safeWindow = state.gemini_analysis?.estimated_safe_window || "less than 4 minutes";
-
-      if (paTimerRef.current && typeof paTimerRef.current === 'number') {
-        clearTimeout(paTimerRef.current);
-      }
-
-      paTimerRef.current = setTimeout(() => {
-        const englishChunks = ANNOUNCEMENTS.fireEnglish(zones, safeZones, dangerZones, safeWindow);
-        const hindiChunks = ANNOUNCEMENTS.fireHindi(zones, safeZones);
-        startEmergencyLoop(englishChunks, hindiChunks);
-        paActiveRef.current = true;
-      }, 2000); // IMMEDIATE FEEDBACK: 2s delay instead of 17s
-    }
-
-    // 2. [TRANSITION: END] Active -> Resolved (Manual or Auto-Resolve)
-    if (isResolved && !wasResolved && (wasActive || wasResolved === null)) {
-      if (wasResolved === null) {
-        prevResolvedRef.current = isResolved;
-        prevIncidentRef.current = isActive;
-        return;
-      }
-
-      console.log("[AEGIS] Transition: RESOLVED Detected — Triggering All Clear");
-
-      // Kill emergency PA immediately
-      if (paTimerRef.current) {
-        if (typeof paTimerRef.current === 'number') clearTimeout(paTimerRef.current);
-        if (paTimerRef.current?.__killAllClear) paTimerRef.current.__killAllClear();
-      }
-      stopAnnouncements();
-      window.speechSynthesis.cancel();
-      paActiveRef.current = false;
-
+    if (isResolved && isActive && wasActive) {
+      // Incident just resolved
       try { saveIncidentToHistory(state); } catch (err) { }
-
-      const killGuard = { alive: true };
-      const cleanupRef = () => { killGuard.alive = false; };
-      paTimerRef.current = { __killAllClear: cleanupRef };
-
-      let round = 0;
-      function playAllClearRound() {
-        if (!killGuard.alive) return;
-        if (round >= 3) {
-          setPaMuted(true);
-          stopAnnouncements();
-          return;
-        }
-        round++;
-        console.log(`[AEGIS] Playing All Clear Round ${round}/3`);
-        announce(ANNOUNCEMENTS.allClearEnglish(), {
-          lang: "en",
-          rate: 1.0,
-          onEnd: () => {
-            if (!killGuard.alive) return;
-            setTimeout(() => {
-              if (!killGuard.alive) return;
-              announce(ANNOUNCEMENTS.allClearHindi(), {
-                lang: "hi",
-                rate: 1.0,
-                onEnd: () => {
-                  if (!killGuard.alive) return;
-                  setTimeout(playAllClearRound, 2000);
-                }
-              });
-            }, 1500);
-          }
-        });
-      }
-
-      // 3. ENGINE RECOVERY DELAY: Wait 1.2s for browser to flush TTS buffer before starting All Clear
-      setTimeout(playAllClearRound, 1200);
     }
 
-    // 3. [HARD KILL] If incident stops but wasn't resolved (manual reset)
-    if (!isActive && !isResolved && wasActive) {
-      console.log("[AEGIS] Transition: CANCELLED/RESET Detected");
-      if (paTimerRef.current && typeof paTimerRef.current === 'number') {
-        clearTimeout(paTimerRef.current);
-      }
-      stopAnnouncements();
-      window.speechSynthesis.cancel();
-    }
-
-    // Update refs for next payload
     prevIncidentRef.current = isActive;
     prevResolvedRef.current = isResolved;
-  }, [state?.incident_active, state?.incident_resolved, paMuted]);
+  }, [state]);
 
   if (!state) return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
@@ -160,7 +70,8 @@ export default function Dashboard() {
       <div className="text-center max-w-lg">
         <div className="text-6xl mb-6 animate-pulse">⚡</div>
         <h1 className="text-3xl font-black text-white mb-2">AEGIS Initializing</h1>
-        <p className="text-gray-500 text-sm mb-6 uppercase tracking-widest">Autonomous Emergency Guardian &amp; Incident Synchronization</p>
+        <p className="text-gray-500 text-sm mb-1 uppercase tracking-widest">Autonomous Emergency Guardian &amp; Incident Synchronization</p>
+        <p className="text-[10px] text-gray-700 font-mono">Build Version: Rev.00160-FinalConnection</p>
 
         <div className="flex flex-col gap-2 text-left mt-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
           {[
@@ -234,6 +145,9 @@ export default function Dashboard() {
   return (
     <div className={`min-h-screen bg-gray-950 text-white p-4
       ${isAlert ? "ring-4 ring-red-500 ring-inset" : ""}`}>
+
+      {/* Emergency PA Manager (Side Effects) */}
+      <EmergencyManager state={state} paMuted={paMuted} setPaText={setPaText} />
 
       {/* Header */}
       <div className="flex justify-between items-center mb-4">
@@ -443,9 +357,26 @@ export default function Dashboard() {
             active={aegisStarted}
             resolved={incidentResolved}
           />
-          {incidentActive && <AgentLog logs={state.agent_log} />}
         </div>
       </div>
+
+      {/* PA TICKER FAILSAFE */}
+      {(incidentActive || incidentResolved) && paText && (
+        <div className="fixed bottom-0 left-0 right-0 bg-red-600 text-white py-3 px-6 z-50 flex items-center gap-4 animate-in slide-in-from-bottom duration-500 shadow-2xl border-t border-white/20">
+          <div className="flex-shrink-0 bg-white text-red-600 font-black px-2 py-0.5 rounded text-xs uppercase tracking-tighter">AEGIS PA</div>
+          <div className="flex-1 overflow-hidden font-bold tracking-tight text-lg">
+            <div className="whitespace-nowrap animate-[marquee_20s_linear_infinite]">
+              {paText} • {paText} • {paText} • {paText}
+            </div>
+          </div>
+        </div>
+      )}
+      <style>{`
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-33.33%); }
+        }
+      `}</style>
     </div>
   );
 }

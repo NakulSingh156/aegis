@@ -3,8 +3,8 @@
 
 const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
 
-// VERIFIED LIVE CLOUD RUN ENDPOINT (Revision 00028)
-const CLOUD_BASE_URL = "https://aegis-backend-elq54assoq-el.a.run.app";
+// VERIFIED LIVE CLOUD RUN ENDPOINT (Revision 00030)
+const CLOUD_BASE_URL = "https://aegis-backend-775713800470.us-central1.run.app"; // VERIFIED STABLE FOR WSS
 
 export const API_BASE_URL = isLocal ? "http://localhost:8000" : CLOUD_BASE_URL;
 

@@ -19,13 +19,28 @@ function getBestVoice(lang = "en") {
 let _sessionId = 0;
 let _loopTimer = null;
 let _muted = false;
+let _heartbeat = null;
+
+function startHeartbeat() {
+  if (_heartbeat) return;
+  _heartbeat = setInterval(() => {
+    // Chrome bug: speechSynthesis can hang. resume() keeps it awake.
+    window.speechSynthesis.resume();
+  }, 5000);
+}
+
+function stopHeartbeat() {
+  if (_heartbeat) clearInterval(_heartbeat);
+  _heartbeat = null;
+}
 
 function kill() {
   _muted = true;
-  _sessionId++;          // invalidate all in-flight callbacks
+  _sessionId++;
   if (_loopTimer) clearTimeout(_loopTimer);
   _loopTimer = null;
   window.speechSynthesis.cancel();
+  stopHeartbeat();
 }
 
 /**
@@ -43,11 +58,22 @@ function speakChunk(text, lang, rate, mySession) {
     u.pitch = 1.1;
     u.volume = 1.0;
 
+    // SAFETY FALLBACK: Increase to 15s for long evacuation instructions
+    const safetyTimeout = setTimeout(() => {
+      console.warn("[AEGIS] Voice onend timeout - skip chunk");
+      resolve();
+    }, 15000);
+
     u.onend = () => {
+      clearTimeout(safetyTimeout);
       if (_sessionId !== mySession) return reject("killed");
       resolve();
     };
-    u.onerror = () => reject("error");
+    u.onerror = (err) => {
+      clearTimeout(safetyTimeout);
+      console.error("[AEGIS] Voice Error:", err);
+      reject("error");
+    };
 
     window.speechSynthesis.speak(u);
   });
@@ -79,9 +105,11 @@ export function stopAnnouncements() {
 
 export function announce(text, options = {}) {
   _muted = false;
-  const mySession = _sessionId; // use CURRENT session, don't kill
+  const mySession = _sessionId;
   const lang = options.lang || "en";
   const rate = options.rate || 1.15;
+
+  if (options.onSpeak) options.onSpeak(text);
 
   const u = new SpeechSynthesisUtterance(text);
   u.voice = getBestVoice(lang);
@@ -89,45 +117,61 @@ export function announce(text, options = {}) {
   u.rate = rate;
   u.pitch = 1.1;
   u.volume = 1.0;
+
   if (options.onEnd) {
     u.onend = () => {
-      if (_sessionId !== mySession) return; // stale — ignore
+      if (_sessionId !== mySession) return;
       options.onEnd();
     };
   }
-  window.speechSynthesis.cancel();
-  // Mandatory buffer: wait for browser TTS engine to flush cancellation before next speak
-  setTimeout(() => {
-    if (_sessionId !== mySession) return;
-    window.speechSynthesis.speak(u);
-  }, 250);
+
+  startHeartbeat();
+  if (_sessionId !== mySession) return;
+  // NOTE: No cancel here to allow queuing
+  window.speechSynthesis.speak(u);
 }
 
 /**
  * Emergency loop: speaks English chunks, then Hindi chunks, then repeats.
  * Runs until stopAnnouncements() is called.
  */
-export function startEmergencyLoop(englishChunks, hindiChunks) {
-  kill(); // kill any prior
+export function startEmergencyLoop(englishChunks, hindiChunks, onSpeak) {
   _muted = false;
-  const mySession = ++_sessionId; // NEW session
+  const mySession = ++_sessionId;
+  startHeartbeat();
+  window.speechSynthesis.cancel(); // ONE initial clear to take control
 
   async function cycle() {
-    while (_sessionId === mySession) {
-      // English
-      await speakSequence(englishChunks, "en", 1.15, mySession);
-      if (_sessionId !== mySession) return;
+    while (_sessionId === mySession && !_muted) {
+      // 1. English Sequence
+      for (const chunk of englishChunks) {
+        if (_sessionId !== mySession) return;
+        if (onSpeak) onSpeak(chunk);
+        try {
+          await speakChunk(chunk, "en", 1.15, mySession);
+          await new Promise(r => setTimeout(r, 100)); // Sync buffer
+        } catch (e) {
+          if (e === "killed") return;
+        }
+      }
 
-      // 1s gap
+      if (_sessionId !== mySession) return;
       await new Promise(r => setTimeout(r, 1000));
-      if (_sessionId !== mySession) return;
 
-      // Hindi
-      await speakSequence(hindiChunks, "hi", 1.1, mySession);
-      if (_sessionId !== mySession) return;
+      // 2. Hindi Sequence
+      for (const chunk of hindiChunks) {
+        if (_sessionId !== mySession) return;
+        if (onSpeak) onSpeak(chunk);
+        try {
+          await speakChunk(chunk, "hi", 1.1, mySession);
+          await new Promise(r => setTimeout(r, 100));
+        } catch (e) {
+          if (e === "killed") return;
+        }
+      }
 
-      // 1.5s gap before repeating
-      await new Promise(r => setTimeout(r, 1500));
+      if (_sessionId !== mySession) return;
+      await new Promise(r => setTimeout(r, 2000));
     }
   }
 

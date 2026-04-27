@@ -10,7 +10,8 @@ import copy
 from websocket_manager import manager
 from detection.camera_processor import (
     start_all_cameras, stop_all_cameras, 
-    latest_frames, frames_lock, PRELOADED_JPEG_BUFFERS
+    latest_frames, frames_lock, PRELOADED_JPEG_BUFFERS,
+    start_hybrid_engines
 )
 from fusion.event_fusion import start_fusion_engine
 from agent.tools import log_action, get_venue_snapshot
@@ -28,7 +29,22 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup():
-    print("[AEGIS] Backend ready. Waiting for START command...")
+    print("[AEGIS] Backend starting up...")
+    # Start heavy engines in background
+    start_hybrid_engines()
+    # Start global broadcast task
+    asyncio.create_task(broadcast_loop())
+    print("[AEGIS] Broadcast engine active.")
+
+async def broadcast_loop():
+    """Single global loop to broadcast state to all clients at 2Hz"""
+    while True:
+        try:
+            snap = vs.get_snapshot()
+            await manager.broadcast(snap)
+        except Exception as e:
+            print(f"[AEGIS] Broadcast Loop Error: {e}")
+        await asyncio.sleep(0.3)
 
 @app.get("/health")
 def health():
@@ -191,12 +207,12 @@ async def simulate_scream():
 def generate_mjpeg(zone_name: str):
     while True:
         jpeg_bytes = None
-        with cp.frames_lock:
-            jpeg_bytes = cp.latest_frames.get(zone_name)
+        with frames_lock:
+            jpeg_bytes = latest_frames.get(zone_name)
         
         # [LOW LATENCY FIX] If no live frame, serve the first pre-loaded frame immediately
         if jpeg_bytes is None:
-            cache = cp.PRELOADED_JPEG_BUFFERS.get(zone_name, [])
+            cache = PRELOADED_JPEG_BUFFERS.get(zone_name, [])
             # Pre-load just 3 frames for instant-low-overhead startup
             if cache: jpeg_bytes = cache[0]
 
@@ -223,13 +239,11 @@ def camera_feed(zone_name: str):
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
+        # Keep connection open - broadcasting is handled by the global loop
         while True:
-            # Atomic broadcast at 2Hz
-            snap = vs.get_snapshot()
-            await manager.broadcast(snap)
-            await asyncio.sleep(0.5)
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
-        print(f"[AEGIS] WS Error: {e}")
+        print(f"[AEGIS] WS Connection Error: {e}")
         manager.disconnect(websocket)

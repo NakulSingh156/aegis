@@ -43,9 +43,6 @@ CAMERA_CONFIG = {
     "lobby":      {"path": "videos/lobby_normal.mp4",           "incident": False},
     "restaurant": {"path": "videos/restaurant_incident.mp4",    "incident": True},
     "corridor_a": {"path": "videos/corridor_normal.mp4",        "incident": False},
-    "stairwell":  {"path": "videos/stairwell_normal.mp4",       "incident": False},
-    "parking":    {"path": "videos/parking_normal.mp4",         "incident": False},
-    "pool":       {"path": "videos/pool_normal.mp4",            "incident": False},
 }
 
 # Shared state
@@ -87,29 +84,43 @@ def preload_frames():
         PRELOADED_JPEG_BUFFERS[zone] = buffer
     print(f"[AEGIS] Pre-encoded {len(PRELOADED_JPEG_BUFFERS)} camera streams ✅")
 
-# Initial Load
-preload_frames()
-
-# SEED CACHE: Dashboard loads instantly
-with frames_lock:
-    for zone, buff in PRELOADED_JPEG_BUFFERS.items():
-        if buff: latest_frames[zone] = buff[0]
-
-# Pre-load Models
+# LAZY INITIALIZATION SYSTEM
 detector_lock = threading.Lock()
 _SHARED_FIRE_MODEL = None
 _SHARED_PERSON_MODEL = None
-try:
-    import os
-    from ultralytics import YOLO
-    fire_path = "fire_best.pt"
-    if os.path.exists(fire_path) and os.path.getsize(fire_path) > 1_000_000:
-        _SHARED_FIRE_MODEL = YOLO(fire_path, task="detect")
-        _SHARED_FIRE_MODEL.to("cpu")
-    _SHARED_PERSON_MODEL = YOLO("yolov8n.pt", task="detect")
-    _SHARED_PERSON_MODEL.to("cpu")
-except Exception as e:
-    print(f"[AEGIS] Model load failed: {e}")
+_INIT_COMPLETE = False
+
+def initialize_engines():
+    """Background task to load heavy models and pre-encode frames without blocking startup"""
+    global _INIT_COMPLETE, _SHARED_FIRE_MODEL, _SHARED_PERSON_MODEL
+    try:
+        print("[AEGIS] Starting background engine initialization...")
+        preload_frames()
+        
+        from ultralytics import YOLO
+        import os
+        fire_path = "fire_best.pt"
+        if os.path.exists(fire_path) and os.path.getsize(fire_path) > 1_000_000:
+            _SHARED_FIRE_MODEL = YOLO(fire_path, task="detect")
+            _SHARED_FIRE_MODEL.to("cpu")
+        
+        _SHARED_PERSON_MODEL = YOLO("yolov8n.pt", task="detect")
+        _SHARED_PERSON_MODEL.to("cpu")
+        
+        # Initial Seed
+        with frames_lock:
+            for zone, buff in PRELOADED_JPEG_BUFFERS.items():
+                if buff: latest_frames[zone] = buff[0]
+                
+        _INIT_COMPLETE = True
+        print("[AEGIS] 🧠 Hybrid engines initialized and ready.")
+    except Exception as e:
+        print(f"[AEGIS] Hybrid init failed: {e}")
+
+def start_hybrid_engines():
+    """Call this from main.py startup"""
+    threading.Thread(target=initialize_engines, daemon=True).start()
+
 
 def process_camera(zone_name: str, config: dict):
     fire_det   = FireDetector(shared_model=_SHARED_FIRE_MODEL)
@@ -177,7 +188,8 @@ def process_camera(zone_name: str, config: dict):
         with frames_lock:
             latest_frames[zone_name] = jpeg.tobytes()
 
-        time.sleep(0.04) 
+        # BALANCED: 5 FPS for total stability on 1 vCPU
+        time.sleep(0.2) 
         
     cap.release()
 
