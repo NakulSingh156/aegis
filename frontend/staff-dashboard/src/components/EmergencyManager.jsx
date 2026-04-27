@@ -3,7 +3,6 @@ import { startEmergencyLoop, stopAnnouncements, ANNOUNCEMENTS, announce } from '
 
 // persist across re-renders
 let _LOCKED_ID = null;
-let _DELAY_TIMER = null;
 let _RESOLVED_SET = new Set();
 
 export default function EmergencyManager({ state, paMuted, setPaText }) {
@@ -14,17 +13,13 @@ export default function EmergencyManager({ state, paMuted, setPaText }) {
         const incidentActive = state.incident_active;
         const isResolved = state.incident_resolved;
 
-        // 1. START: Lock new incident
+        // 1. START: Lock new incident and start PA immediately
         if (incidentActive && !isResolved && _LOCKED_ID !== currentId) {
             console.log("[AEGIS] Shield: Locking incident", currentId);
             _LOCKED_ID = currentId;
             _RESOLVED_SET.delete(currentId);
-            if (_DELAY_TIMER) clearTimeout(_DELAY_TIMER);
 
-            // 6s Delay for Scream
-            _DELAY_TIMER = setTimeout(() => {
-                if (_LOCKED_ID !== currentId) return;
-                if (paMuted) return; // Check mute at play-time, not lock-time
+            if (!paMuted) {
                 const zones = state.affected_zones || ["lobby"];
                 const safe = state.safe_zones || ["parking"];
                 const win = state.gemini_analysis?.estimated_safe_window || "4 mins";
@@ -33,20 +28,18 @@ export default function EmergencyManager({ state, paMuted, setPaText }) {
                     ANNOUNCEMENTS.fireHindi(zones, safe),
                     (txt) => setPaText(txt)
                 );
-            }, 6000);
+            }
         }
 
         // 2. STOP & ALL-CLEAR
         if (_LOCKED_ID !== null && (isResolved || !incidentActive)) {
             const closingId = _LOCKED_ID;
             _LOCKED_ID = null;
-            if (_DELAY_TIMER) clearTimeout(_DELAY_TIMER);
             stopAnnouncements();
             setPaText("");
 
             if (isResolved && !_RESOLVED_SET.has(closingId) && !paMuted) {
                 _RESOLVED_SET.add(closingId);
-                // Delay 500ms after cancel() — Chrome needs time to reset the speech engine
                 setTimeout(() => {
                     let r = 0;
                     const play = () => {
