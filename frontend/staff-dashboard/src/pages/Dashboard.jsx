@@ -73,7 +73,7 @@ export default function Dashboard() {
         <div className="text-6xl mb-6 animate-pulse">⚡</div>
         <h1 className="text-3xl font-black text-white mb-2">AEGIS Initializing</h1>
         <p className="text-gray-500 text-sm mb-1 uppercase tracking-widest">Autonomous Emergency Guardian &amp; Incident Synchronization</p>
-        <p className="text-[10px] text-gray-700 font-mono">Build Version: Rev.00220-RootCause</p>
+        <p className="text-[10px] text-gray-700 font-mono">Build Version: Rev.00230-CleanPA</p>
 
         <div className="flex flex-col gap-2 text-left mt-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
           {[
