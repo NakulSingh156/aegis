@@ -519,8 +519,9 @@ Built for **Google HacktoSolve (H2S) 2026** — Problem Statement: *Rapid Crisis
 | Name | Role |
 |------|------|
 | Nakul Singh | Team Lead — Backend, CV Pipeline, Architecture |
-| Ayesha Maniyar | AI Agent — Gemini Integration, Triage Logic |
-| Michelle Hoolgeri | Frontend — Dashboard, PWA, Deployment |
+| Michelle Hoolgeri | AI Agent — Gemini Integration, Triage Logic |
+| Ayesha Maniyar | Frontend — Dashboard, PWA, Full Stack Development |
+| Gouri Banapurmath | Cloud and Firebase Deployment |
 
 *3rd Year B.Tech Computer Science (AI) — 2026*
 
