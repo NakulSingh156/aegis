@@ -31,7 +31,7 @@ export default function Dashboard() {
   const [showFullBrief, setShowFullBrief] = useState(false);
   const [loadingTime, setLoadingTime] = useState(0);
 
-  // Pre-load browser voices on mount
+  // Pre-load browser voices on mount (run ONCE only)
   useEffect(() => {
     window.speechSynthesis.getVoices();
     const interval = setInterval(() => {
@@ -42,9 +42,11 @@ export default function Dashboard() {
       if (paTimerRef.current) {
         if (typeof paTimerRef.current === 'number') clearTimeout(paTimerRef.current);
       }
-      stopAnnouncements();
+      // NOTE: Do NOT call stopAnnouncements() here!
+      // This effect's cleanup runs on every state change, which was
+      // killing TTS every 300ms. EmergencyManager handles all PA lifecycle.
     };
-  }, [state]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const paActiveRef = useRef(false); // tracks if the emergency PA loop is currently running
 
@@ -71,7 +73,7 @@ export default function Dashboard() {
         <div className="text-6xl mb-6 animate-pulse">⚡</div>
         <h1 className="text-3xl font-black text-white mb-2">AEGIS Initializing</h1>
         <p className="text-gray-500 text-sm mb-1 uppercase tracking-widest">Autonomous Emergency Guardian &amp; Incident Synchronization</p>
-        <p className="text-[10px] text-gray-700 font-mono">Build Version: Rev.00210-Ironclad</p>
+        <p className="text-[10px] text-gray-700 font-mono">Build Version: Rev.00220-RootCause</p>
 
         <div className="flex flex-col gap-2 text-left mt-6 bg-gray-900/50 p-6 rounded-2xl border border-gray-800">
           {[

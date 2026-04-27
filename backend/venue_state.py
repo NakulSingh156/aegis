@@ -1,4 +1,12 @@
 import threading
+import os, time
+
+# Force IST timezone for all time.strftime() calls across the backend
+os.environ["TZ"] = "Asia/Kolkata"
+try:
+    time.tzset()
+except AttributeError:
+    pass  # Windows doesn't have tzset
 
 # This is the single source of truth for the entire system
 # Every camera processor writes here
