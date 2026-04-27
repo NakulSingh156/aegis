@@ -1,10 +1,16 @@
+/**
+ * AEGIS PA System — Rev.00210-Ironclad
+ * 
+ * Uses simple onend callback chaining (NOT async/await).
+ * Chrome's speechSynthesis is unreliable with Promises.
+ */
+
 const VOICES_PRIORITY = ["Google UK English Female", "Samantha", "Victoria", "Karen"];
 
-// Pre-load voices (required on Chrome — getVoices() returns [] until onvoiceschanged fires)
-let _voicesLoaded = false;
+// Pre-load voices (Chrome requires this)
 if (typeof window !== 'undefined' && window.speechSynthesis) {
-  window.speechSynthesis.getVoices(); // trigger initial load
-  window.speechSynthesis.onvoiceschanged = () => { _voicesLoaded = true; };
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => { };
 }
 
 function getBestVoice(lang = "en") {
@@ -20,20 +26,18 @@ function getBestVoice(lang = "en") {
   return voices[0] || null;
 }
 
-// ---- ROBUST KILL MECHANISM ----
-// Every loop/announce gets a session ID. When we stop, we bump the ID.
-// Any callback from a stale session is silently ignored.
+// ---- SESSION CONTROL ----
 let _sessionId = 0;
-let _loopTimer = null;
-let _muted = false;
 let _heartbeat = null;
 
 function startHeartbeat() {
   if (_heartbeat) return;
   _heartbeat = setInterval(() => {
-    // Chrome bug: speechSynthesis can hang. resume() keeps it awake.
-    window.speechSynthesis.resume();
-  }, 5000);
+    // Chrome bug workaround: resume() prevents speech from freezing
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.resume();
+    }
+  }, 3000);
 }
 
 function stopHeartbeat() {
@@ -41,78 +45,9 @@ function stopHeartbeat() {
   _heartbeat = null;
 }
 
-function kill() {
-  _muted = true;
-  _sessionId++;
-  if (_loopTimer) clearTimeout(_loopTimer);
-  _loopTimer = null;
-  window.speechSynthesis.cancel();
-  stopHeartbeat();
-}
-
-/**
- * Speak a SINGLE short chunk. ALWAYS resolves (never rejects).
- * On error, logs and resolves so the loop continues.
- */
-function speakChunk(text, lang, rate, mySession) {
-  return new Promise((resolve) => {
-    if (_sessionId !== mySession || _muted) return resolve();
-
-    const u = new SpeechSynthesisUtterance(text);
-    u.voice = getBestVoice(lang);
-    u.lang = lang === "hi" ? "hi-IN" : "en-US";
-    u.rate = rate;
-    u.pitch = 1.1;
-    u.volume = 1.0;
-
-    const safetyTimeout = setTimeout(() => {
-      console.warn("[AEGIS] Voice timeout - advancing");
-      resolve();
-    }, 15000);
-
-    u.onend = () => {
-      clearTimeout(safetyTimeout);
-      resolve();
-    };
-    u.onerror = (err) => {
-      clearTimeout(safetyTimeout);
-      console.warn("[AEGIS] Voice error (non-fatal):", err?.error || err);
-      // Always resolve so the loop continues
-      resolve();
-    };
-
-    window.speechSynthesis.speak(u);
-  });
-}
-
-/**
- * Speak an array of short sentences sequentially.
- */
-async function speakSequence(chunks, lang, rate, mySession) {
-  for (const chunk of chunks) {
-    if (_sessionId !== mySession) return;
-    await speakChunk(chunk, lang, rate, mySession);
-    await new Promise(r => setTimeout(r, 300));
-    if (_sessionId !== mySession) return;
-  }
-}
-
-// ---- PUBLIC API ----
-
-export function stopAnnouncements() {
-  kill();
-}
-
-export function announce(text, options = {}) {
-  _muted = false;
-  const mySession = _sessionId;
-  const lang = options.lang || "en";
-  const rate = options.rate || 1.15;
-
-  if (options.onSpeak) options.onSpeak(text);
-
-  // Fresh cancel to ensure clean slate
-  window.speechSynthesis.cancel();
+// ---- SPEAK ONE UTTERANCE WITH CALLBACK ----
+function speakOne(text, lang, rate, session, onDone) {
+  if (_sessionId !== session) return;
 
   const u = new SpeechSynthesisUtterance(text);
   u.voice = getBestVoice(lang);
@@ -121,73 +56,115 @@ export function announce(text, options = {}) {
   u.pitch = 1.1;
   u.volume = 1.0;
 
-  if (options.onEnd) {
-    u.onend = () => {
-      if (_sessionId !== mySession) return;
-      options.onEnd();
-    };
-  }
+  // Safety: if onend never fires, advance after 12s
+  const safety = setTimeout(() => {
+    console.warn("[AEGIS-PA] Safety timeout, advancing");
+    if (onDone) onDone();
+  }, 12000);
+
+  u.onend = () => {
+    clearTimeout(safety);
+    if (onDone) onDone();
+  };
   u.onerror = () => {
-    // Still call onEnd on error so the All-Clear sequence continues
-    if (options.onEnd && _sessionId === mySession) {
-      setTimeout(() => options.onEnd(), 500);
-    }
+    clearTimeout(safety);
+    // On error, still advance to next chunk
+    if (onDone) setTimeout(onDone, 300);
   };
 
-  startHeartbeat();
-  if (_sessionId !== mySession) return;
+  window.speechSynthesis.speak(u);
+}
 
-  // Slight delay after cancel() to let Chrome reset
-  setTimeout(() => {
-    if (_sessionId !== mySession) return;
-    window.speechSynthesis.speak(u);
-  }, 100);
+// ---- SPEAK A LIST OF CHUNKS IN SEQUENCE ----
+function speakList(chunks, lang, rate, session, onAllDone) {
+  let i = 0;
+  function next() {
+    if (_sessionId !== session || i >= chunks.length) {
+      if (onAllDone) onAllDone();
+      return;
+    }
+    const text = chunks[i];
+    i++;
+    speakOne(text, lang, rate, session, () => {
+      // Small pause between chunks
+      setTimeout(next, 150);
+    });
+  }
+  next();
+}
+
+// ---- PUBLIC API ----
+
+export function stopAnnouncements() {
+  _sessionId++;
+  window.speechSynthesis.cancel();
+  stopHeartbeat();
 }
 
 /**
- * Emergency loop: speaks English chunks, then Hindi chunks, then repeats.
- * Runs until stopAnnouncements() is called.
- * Resilient to Chrome errors — will retry up to 3 times.
+ * Speak a single text with optional onEnd callback.
+ * Used for All-Clear announcements.
  */
-export function startEmergencyLoop(englishChunks, hindiChunks, onSpeak) {
-  _muted = false;
-  const mySession = ++_sessionId;
+export function announce(text, options = {}) {
+  const session = _sessionId;
   startHeartbeat();
-  window.speechSynthesis.cancel();
 
-  async function cycle() {
-    // Small initial delay to let cancel() settle
-    await new Promise(r => setTimeout(r, 200));
-
-    while (_sessionId === mySession && !_muted) {
-      // 1. English Sequence
-      for (const chunk of englishChunks) {
-        if (_sessionId !== mySession) return;
-        if (onSpeak) onSpeak(chunk);
-        await speakChunk(chunk, "en", 1.15, mySession);
-        await new Promise(r => setTimeout(r, 100));
-      }
-
-      if (_sessionId !== mySession) return;
-      await new Promise(r => setTimeout(r, 1000));
-
-      // 2. Hindi Sequence
-      for (const chunk of hindiChunks) {
-        if (_sessionId !== mySession) return;
-        if (onSpeak) onSpeak(chunk);
-        await speakChunk(chunk, "hi", 1.1, mySession);
-        await new Promise(r => setTimeout(r, 100));
-      }
-
-      if (_sessionId !== mySession) return;
-      await new Promise(r => setTimeout(r, 2000));
-    }
-  }
-
-  cycle();
+  // Small delay to let any previous cancel() settle
+  setTimeout(() => {
+    if (_sessionId !== session) return;
+    speakOne(text, options.lang || "en", options.rate || 1.15, session, () => {
+      if (options.onEnd) options.onEnd();
+    });
+  }, 150);
 }
 
-// ---- ANNOUNCEMENT TEXTS (broken into SHORT chunks to avoid Chrome 15s cutoff) ----
+/**
+ * Emergency loop: English → pause → Hindi → pause → repeat forever.
+ * Starts with a 3-second delay to let the "scream" moment breathe.
+ */
+export function startEmergencyLoop(englishChunks, hindiChunks, onSpeak) {
+  const session = ++_sessionId;
+  window.speechSynthesis.cancel();
+  startHeartbeat();
+
+  function loop() {
+    if (_sessionId !== session) return;
+
+    // Update PA ticker with first chunk
+    if (onSpeak && englishChunks[0]) onSpeak(englishChunks[0]);
+
+    // English sequence
+    speakList(englishChunks, "en", 1.15, session, () => {
+      if (_sessionId !== session) return;
+
+      // 1s pause then Hindi
+      setTimeout(() => {
+        if (_sessionId !== session) return;
+        if (onSpeak && hindiChunks[0]) onSpeak(hindiChunks[0]);
+
+        speakList(hindiChunks, "hi", 1.1, session, () => {
+          if (_sessionId !== session) return;
+
+          // 2s pause then loop
+          setTimeout(loop, 2000);
+        });
+      }, 1000);
+    });
+  }
+
+  // 3-second lead-in: let the fire detection moment be dramatic
+  // First, speak a short "ATTENTION" to warm up Chrome's TTS engine
+  speakOne("Attention!", "en", 1.2, session, () => {
+    if (_sessionId !== session) return;
+    // Now wait 2 more seconds, then start the full loop
+    setTimeout(() => {
+      if (_sessionId !== session) return;
+      loop();
+    }, 2000);
+  });
+}
+
+// ---- ANNOUNCEMENT TEXTS ----
 
 export const ANNOUNCEMENTS = {
   fireEnglish: (zones, safeZones, dangerZones, safeWindow) => [
