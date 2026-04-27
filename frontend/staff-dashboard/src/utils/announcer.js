@@ -1,5 +1,12 @@
 const VOICES_PRIORITY = ["Google UK English Female", "Samantha", "Victoria", "Karen"];
 
+// Pre-load voices (required on Chrome — getVoices() returns [] until onvoiceschanged fires)
+let _voicesLoaded = false;
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  window.speechSynthesis.getVoices(); // trigger initial load
+  window.speechSynthesis.onvoiceschanged = () => { _voicesLoaded = true; };
+}
+
 function getBestVoice(lang = "en") {
   const voices = window.speechSynthesis.getVoices();
   if (lang === "hi") {

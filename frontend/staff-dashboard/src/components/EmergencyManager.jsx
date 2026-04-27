@@ -16,7 +16,6 @@ export default function EmergencyManager({ state, paMuted, setPaText }) {
 
         // 1. START: Lock new incident
         if (incidentActive && !isResolved && _LOCKED_ID !== currentId) {
-            if (paMuted) return;
             console.log("[AEGIS] Shield: Locking incident", currentId);
             _LOCKED_ID = currentId;
             _RESOLVED_SET.delete(currentId);
@@ -25,11 +24,12 @@ export default function EmergencyManager({ state, paMuted, setPaText }) {
             // 6s Delay for Scream
             _DELAY_TIMER = setTimeout(() => {
                 if (_LOCKED_ID !== currentId) return;
+                if (paMuted) return; // Check mute at play-time, not lock-time
                 const zones = state.affected_zones || ["lobby"];
                 const safe = state.safe_zones || ["parking"];
-                const window = state.gemini_analysis?.estimated_safe_window || "4 mins";
+                const win = state.gemini_analysis?.estimated_safe_window || "4 mins";
                 startEmergencyLoop(
-                    ANNOUNCEMENTS.fireEnglish(zones, safe, zones, window),
+                    ANNOUNCEMENTS.fireEnglish(zones, safe, zones, win),
                     ANNOUNCEMENTS.fireHindi(zones, safe),
                     (txt) => setPaText(txt)
                 );
@@ -43,24 +43,26 @@ export default function EmergencyManager({ state, paMuted, setPaText }) {
             if (_DELAY_TIMER) clearTimeout(_DELAY_TIMER);
             stopAnnouncements();
             setPaText("");
-            window.speechSynthesis.cancel();
 
             if (isResolved && !_RESOLVED_SET.has(closingId) && !paMuted) {
                 _RESOLVED_SET.add(closingId);
-                let r = 0;
-                const play = () => {
-                    if (r >= 3 || _LOCKED_ID !== null) return;
-                    r++;
-                    setPaText("ALL CLEAR - AREA SECURED");
-                    announce(ANNOUNCEMENTS.allClearEnglish(), {
-                        onEnd: () => setTimeout(() => {
-                            announce(ANNOUNCEMENTS.allClearHindi(), {
-                                onEnd: () => setTimeout(play, 2000)
-                            });
-                        }, 1000)
-                    });
-                };
-                setTimeout(play, 2000);
+                // Delay 500ms after cancel() — Chrome needs time to reset the speech engine
+                setTimeout(() => {
+                    let r = 0;
+                    const play = () => {
+                        if (r >= 3 || _LOCKED_ID !== null) return;
+                        r++;
+                        setPaText("ALL CLEAR - AREA SECURED");
+                        announce(ANNOUNCEMENTS.allClearEnglish(), {
+                            onEnd: () => setTimeout(() => {
+                                announce(ANNOUNCEMENTS.allClearHindi(), {
+                                    onEnd: () => setTimeout(play, 2000)
+                                });
+                            }, 1000)
+                        });
+                    };
+                    play();
+                }, 500);
             }
         }
     }, [state, paMuted, setPaText]);

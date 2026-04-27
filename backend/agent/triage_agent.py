@@ -147,12 +147,9 @@ def _start_auto_resolve():
             
             # If we reached here, the timer expired without manual resolve
             log_action("⏱️ AUTO-RESOLVE: 120s limit reached. Initiating system-wide reset.")
-            from detection.camera_processor import stop_all_cameras
-            stop_all_cameras()
             
-            # SMART BUILDING: Restore normal lighting
-            building_controller.activate_all_clear_lighting()
-            
+            # CRITICAL: Update state FIRST so frontend immediately shows resolved panel
+            # Even if stop_all_cameras() fails, the UI will still transition
             with vs.lock:
                 vs.venue_state["_last_report_snapshot"] = copy.deepcopy(vs.venue_state)
                 vs.venue_state.update({
@@ -170,6 +167,15 @@ def _start_auto_resolve():
                     })
             
             log_action("✅ AUTO ALL-CLEAR: Timer expired. Incident auto-resolved.")
+            
+            # Cleanup AFTER state update (safe to fail)
+            try:
+                from detection.camera_processor import stop_all_cameras
+                stop_all_cameras()
+                building_controller.activate_all_clear_lighting()
+            except Exception as cleanup_err:
+                print(f"[AEGIS] Cleanup warning (non-fatal): {cleanup_err}")
+                
         except Exception as e:
             log_action(f"⚠️ AUTO-RESOLVE ERROR: {str(e)}")
     

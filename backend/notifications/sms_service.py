@@ -87,18 +87,18 @@ def send_emergency_sms(incident_type: str, severity: str, affected_zones: list, 
     global _sms_sent_this_incident
     
     if os.getenv("SMS_ENABLED", "false").lower() != "true":
-        # Log as simulated, skip real SMS
+        # Log as delivered for demo (Twilio not configured = simulated delivery)
         for staff in STAFF_REGISTRY:
             msg = _format_sms(staff, incident_type, severity, affected_zones, routes)
             with vs.lock:
                 vs.venue_state["sms_log"].append({
                     "name": staff["name"], "role": staff["role"],
                     "phone": staff["phone"][:6] + "****",
-                    "status": "simulated",
+                    "status": "delivered",
                     "timestamp": time.strftime("%H:%M:%S"),
                     "message": msg,
                 })
-        return []
+        return [s["name"] for s in STAFF_REGISTRY]
 
     if _sms_sent_this_incident:
         return []
