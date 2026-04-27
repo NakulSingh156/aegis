@@ -204,7 +204,7 @@ async def simulate_scream():
     audio_detector.trigger_simulated_event("scream")
     return {"status": "scream simulated"}
 
-def generate_mjpeg(zone_name: str):
+async def generate_mjpeg(zone_name: str):
     while True:
         jpeg_bytes = None
         with frames_lock:
@@ -224,12 +224,12 @@ def generate_mjpeg(zone_name: str):
                 b'\r\n'
             )
             # Sleep slightly longer on idle to save bandwidth, faster on live
-            time.sleep(0.04 if latest_frames.get(zone_name) else 0.5)
+            await asyncio.sleep(0.04 if latest_frames.get(zone_name) else 0.5)
         else:
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
 
 @app.get("/camera/{zone_name}")
-def camera_feed(zone_name: str):
+async def camera_feed(zone_name: str):
     return StreamingResponse(
         generate_mjpeg(zone_name),
         media_type="multipart/x-mixed-replace; boundary=frame"
